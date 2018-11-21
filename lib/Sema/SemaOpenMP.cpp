@@ -13185,6 +13185,177 @@ Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareReductionDirectiveEnd(
   return DeclReductions;
 }
 
+QualType Sema::ActOnOpenMPDeclareMapperType(Scope *S, Declarator &D) {
+  TypeSourceInfo *TInfo = GetTypeForDeclarator(D, S);
+  QualType T = TInfo->getType();
+  if (D.isInvalidType())
+    return QualType();
+
+  // Make sure there are no unused decl attributes on the declarator.
+  // We don't want to do this for ObjC parameters because we're going
+  // to apply them to the actual parameter declaration.
+  // Likewise, we don't want to do this for alias declarations, because
+  // we are actually going to build a declaration from this eventually.
+  if (D.getContext() != DeclaratorContext::ObjCParameterContext &&
+      D.getContext() != DeclaratorContext::AliasDeclContext &&
+      D.getContext() != DeclaratorContext::AliasTemplateContext)
+    checkUnusedDeclAttributes(D);
+
+  if (getLangOpts().CPlusPlus) {
+    // Check that there are no default arguments (C++ only).
+    CheckExtraCXXDefaultArguments(D);
+  }
+
+  TypeResult ParsedType = CreateParsedType(T, TInfo);
+  if (!ParsedType.isUsable())
+    return QualType();
+
+  QualType MapperType = GetTypeFromParser(ParsedType.get());
+  assert(!MapperType.isNull());
+
+  // [OpenMP 4.0], 2.15 declare reduction Directive, Restrictions, C\C++
+  // A type name in a declare reduction directive cannot be a function type, an
+  // array type, a reference type, or a type qualified with const, volatile or
+  // restrict.
+  // FIXME: lld
+  SourceLocation TyLoc = D.getSourceRange().getBegin();
+  if (MapperType.hasQualifiers()) {
+    Diag(TyLoc, diag::err_omp_reduction_wrong_type) << 0;
+    return QualType();
+  }
+
+  if (MapperType->isFunctionType()) {
+    Diag(TyLoc, diag::err_omp_reduction_wrong_type) << 1;
+    return QualType();
+  }
+  if (MapperType->isReferenceType()) {
+    Diag(TyLoc, diag::err_omp_reduction_wrong_type) << 2;
+    return QualType();
+  }
+  if (MapperType->isArrayType()) {
+    Diag(TyLoc, diag::err_omp_reduction_wrong_type) << 3;
+    return QualType();
+  }
+  return MapperType;
+}
+
+OMPDeclareMapperDecl *Sema::ActOnOpenMPDeclareMapperDirectiveStart(
+    Scope *S, DeclContext *DC, DeclarationName Name, QualType MapperType,
+    SourceLocation StartLoc, AccessSpecifier AS, Decl *PrevDeclInScope) {
+  LookupResult Lookup(*this, Name, SourceLocation(), LookupOMPReductionName,
+                      forRedeclarationInCurContext());
+  //// [OpenMP 4.0], 2.15 declare reduction Directive, Restrictions
+  //// A reduction-identifier may not be re-declared in the current scope for the
+  //// same type or for a type that is compatible according to the base language
+  //// rules.
+  //llvm::DenseMap<QualType, SourceLocation> PreviousRedeclTypes;
+  //OMPDeclareReductionDecl *PrevDRD = nullptr;
+  //bool InCompoundScope = true;
+  //if (S != nullptr) {
+  //  // Find previous declaration with the same name not referenced in other
+  //  // declarations.
+  //  FunctionScopeInfo *ParentFn = getEnclosingFunction();
+  //  InCompoundScope =
+  //      (ParentFn != nullptr) && !ParentFn->CompoundScopes.empty();
+  //  LookupName(Lookup, S);
+  //  FilterLookupForScope(Lookup, DC, S, /*ConsiderLinkage=*/false,
+  //                       /*AllowInlineNamespace=*/false);
+  //  llvm::DenseMap<OMPDeclareReductionDecl *, bool> UsedAsPrevious;
+  //  LookupResult::Filter Filter = Lookup.makeFilter();
+  //  while (Filter.hasNext()) {
+  //    auto *PrevDecl = cast<OMPDeclareReductionDecl>(Filter.next());
+  //    if (InCompoundScope) {
+  //      auto I = UsedAsPrevious.find(PrevDecl);
+  //      if (I == UsedAsPrevious.end())
+  //        UsedAsPrevious[PrevDecl] = false;
+  //      if (OMPDeclareReductionDecl *D = PrevDecl->getPrevDeclInScope())
+  //        UsedAsPrevious[D] = true;
+  //    }
+  //    PreviousRedeclTypes[PrevDecl->getType().getCanonicalType()] =
+  //        PrevDecl->getLocation();
+  //  }
+  //  Filter.done();
+  //  if (InCompoundScope) {
+  //    for (const auto &PrevData : UsedAsPrevious) {
+  //      if (!PrevData.second) {
+  //        PrevDRD = PrevData.first;
+  //        break;
+  //      }
+  //    }
+  //  }
+  //} else if (PrevDeclInScope != nullptr) {
+  //  auto *PrevDRDInScope = PrevDRD =
+  //      cast<OMPDeclareReductionDecl>(PrevDeclInScope);
+  //  do {
+  //    PreviousRedeclTypes[PrevDRDInScope->getType().getCanonicalType()] =
+  //        PrevDRDInScope->getLocation();
+  //    PrevDRDInScope = PrevDRDInScope->getPrevDeclInScope();
+  //  } while (PrevDRDInScope != nullptr);
+  //}
+  //for (const auto &TyData : ReductionTypes) {
+  //  const auto I = PreviousRedeclTypes.find(TyData.first.getCanonicalType());
+  //  bool Invalid = false;
+  //  if (I != PreviousRedeclTypes.end()) {
+  //    Diag(TyData.second, diag::err_omp_declare_reduction_redefinition)
+  //        << TyData.first;
+  //    Diag(I->second, diag::note_previous_definition);
+  //    Invalid = true;
+  //  }
+  //  PreviousRedeclTypes[TyData.first.getCanonicalType()] = TyData.second;
+  //  auto *DRD = OMPDeclareReductionDecl::Create(Context, DC, TyData.second,
+  //                                              Name, TyData.first, PrevDRD);
+  //  DC->addDecl(DRD);
+  //  DRD->setAccess(AS);
+  //  Decls.push_back(DRD);
+  //  if (Invalid)
+  //    DRD->setInvalidDecl();
+  //  else
+  //    PrevDRD = DRD;
+  //}
+  OMPDeclareMapperDecl *PrevDMD = nullptr;
+  // FIXME: lld numclause is not correct
+  auto *DMD = OMPDeclareMapperDecl::Create(Context, DC, StartLoc, Name,
+                                           MapperType, PrevDMD, 1);
+  if (S)
+    PushOnScopeChains(DMD, S, /*AddToContext=*/false);
+  else
+    CurContext->addDecl(DMD);
+  return DMD;
+  //auto *DRD = cast<OMPDeclareReductionDecl>(D);
+
+  //// Enter new function scope.
+  //PushFunctionScope();
+  //setFunctionHasBranchProtectedScope();
+
+  //if (S != nullptr)
+  //  PushDeclContext(S, DRD);
+  //else
+  //  CurContext = DRD;
+
+  //PushExpressionEvaluationContext(
+  //    ExpressionEvaluationContext::PotentiallyEvaluated);
+
+  //return;
+}
+
+Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareMapperDirectiveEnd(
+    OMPDeclareMapperDecl *D, Scope *S, DeclContext *DC, DeclarationName Name,
+    QualType MapperType, SourceLocation StartLoc, AccessSpecifier AS,
+    ArrayRef<OMPClause *> ClauseList, Decl *PrevDeclInScope) {
+  //OMPDeclareMapperDecl *D = nullptr;
+  //if (!CurContext->isFileContext()) {
+  //  Diag(Loc, diag::err_omp_invalid_scope) << "requires";
+  //} else {
+  //  D = CheckOMPRequiresDecl(Loc, ClauseList);
+  //  if (D) {
+  //    CurContext->addDecl(D);
+  //    DSAStack->addRequiresDecl(D);
+  //  }
+  //}
+  D->setClauses(ClauseList);
+  return DeclGroupPtrTy::make(DeclGroupRef(D));
+}
+
 OMPClause *Sema::ActOnOpenMPNumTeamsClause(Expr *NumTeams,
                                            SourceLocation StartLoc,
                                            SourceLocation LParenLoc,
@@ -13290,8 +13461,8 @@ OMPClause *Sema::ActOnOpenMPHintClause(Expr *Hint, SourceLocation StartLoc,
                                        SourceLocation LParenLoc,
                                        SourceLocation EndLoc) {
   // OpenMP [2.13.2, critical construct, Description]
-  // ... where hint-expression is an integer constant expression that evaluates
-  // to a valid lock hint.
+  // ... where hint-expression is an integer constant expression that
+  // evaluates to a valid lock hint.
   ExprResult HintExpr = VerifyPositiveIntegerConstantInClause(Hint, OMPC_hint);
   if (HintExpr.isInvalid())
     return nullptr;
@@ -13327,8 +13498,8 @@ OMPClause *Sema::ActOnOpenMPDistScheduleClause(
       ValExpr = Val.get();
 
       // OpenMP [2.7.1, Restrictions]
-      //  chunk_size must be a loop invariant integer expression with a positive
-      //  value.
+      //  chunk_size must be a loop invariant integer expression with a
+      //  positive value.
       llvm::APSInt Result;
       if (ValExpr->isIntegerConstantExpr(Result, Context)) {
         if (Result.isSigned() && !Result.isStrictlyPositive()) {
@@ -13622,13 +13793,13 @@ OMPClause *Sema::ActOnOpenMPUseDevicePtrClause(ArrayRef<Expr *> VarList,
     PrivateCopies.push_back(VDPrivateRefExpr);
     Inits.push_back(VDInitRefExpr);
 
-    // We need to add a data sharing attribute for this variable to make sure it
-    // is correctly captured. A variable that shows up in a use_device_ptr has
-    // similar properties of a first private variable.
+    // We need to add a data sharing attribute for this variable to make sure
+    // it is correctly captured. A variable that shows up in a use_device_ptr
+    // has similar properties of a first private variable.
     DSAStack->addDSA(D, RefExpr->IgnoreParens(), OMPC_firstprivate, Ref);
 
-    // Create a mappable component for the list item. List items in this clause
-    // only need a component.
+    // Create a mappable component for the list item. List items in this
+    // clause only need a component.
     MVLI.VarBaseDeclarations.push_back(D);
     MVLI.VarComponents.resize(MVLI.VarComponents.size() + 1);
     MVLI.VarComponents.back().push_back(
@@ -13707,9 +13878,9 @@ OMPClause *Sema::ActOnOpenMPIsDevicePtrClause(ArrayRef<Expr *> VarList,
     // Record the expression we've just processed.
     MVLI.ProcessedVarList.push_back(SimpleRefExpr);
 
-    // Create a mappable component for the list item. List items in this clause
-    // only need a component. We use a null declaration to signal fields in
-    // 'this'.
+    // Create a mappable component for the list item. List items in this
+    // clause only need a component. We use a null declaration to signal
+    // fields in 'this'.
     assert((isa<DeclRefExpr>(SimpleRefExpr) ||
             isa<CXXThisExpr>(cast<MemberExpr>(SimpleRefExpr)->getBase())) &&
            "Unexpected device pointer expression!");

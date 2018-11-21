@@ -1136,6 +1136,8 @@ def err_omp_declare_target_unexpected_clause: Error<
   "unexpected '%0' clause, only 'to' or 'link' clauses expected">;
 def err_omp_expected_clause: Error<
   "expected at least one clause on '#pragma omp %0' directive">;
+def err_omp_expected_mapper_identifier : Error<
+  "expected %select{mapper|variable}0 identifier in directive 'pragma omp declare mapper'">;
 
 // Pragma loop support.
 def err_pragma_loop_missing_argument : Error<

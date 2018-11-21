@@ -2844,6 +2844,13 @@ Decl *TemplateDeclInstantiator::VisitOMPDeclareReductionDecl(
   return NewDRD;
 }
 
+Decl *
+TemplateDeclInstantiator::VisitOMPDeclareMapperDecl(OMPDeclareMapperDecl *D) {
+  // FIXME: lld
+  llvm_unreachable("Declare mapper directive cannot be instantiated within a "
+                   "dependent context");
+}
+
 Decl *TemplateDeclInstantiator::VisitOMPCapturedExprDecl(
     OMPCapturedExprDecl * /*D*/) {
   llvm_unreachable("Should not be met in templates");

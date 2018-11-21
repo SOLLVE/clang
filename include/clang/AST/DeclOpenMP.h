@@ -207,6 +207,107 @@ public:
   }
 };
 
+/// This represents '#pragma omp declare mapper ...' directive. Map clauses are
+/// allowed to use with this directive. The following example declares a user
+/// defined mapper for the type 'struct vec'. This example instructs the fields
+/// 'len' and 'data' should be mapped when mapping instances of 'struct vec'.
+///
+/// \code
+/// #pragma omp declare mapper(mid: struct vec v) map(v.len, v.data[0:N])
+/// \endcode
+class OMPDeclareMapperDecl final
+    : public ValueDecl,
+      public DeclContext,
+      private llvm::TrailingObjects<OMPDeclareMapperDecl, OMPClause *> {
+  friend class ASTDeclReader;
+  friend TrailingObjects;
+
+  // Number of clauses associated with this mapper declaration
+  unsigned NumClauses = 0;
+
+  LazyDeclPtr PrevDeclInScope;
+
+  virtual void anchor();
+
+  OMPDeclareMapperDecl(Kind DK, DeclContext *DC, SourceLocation L,
+                       DeclarationName Name, QualType Ty,
+                       OMPDeclareMapperDecl *PrevDeclInScope)
+      : ValueDecl(DK, DC, L, Name, Ty), DeclContext(DK), NumClauses(0),
+        PrevDeclInScope(PrevDeclInScope) {}
+
+  /// Returns an array of immutable clauses associated with this mapper
+  /// declaration
+  ArrayRef<const OMPClause *> getClauses() const {
+    return llvm::makeArrayRef(getTrailingObjects<OMPClause *>(), NumClauses);
+  }
+
+  /// Returns an array of clauses associated with this mapper declaration
+  MutableArrayRef<OMPClause *> getClauses() {
+    return MutableArrayRef<OMPClause *>(getTrailingObjects<OMPClause *>(),
+                                        NumClauses);
+  }
+
+  void setPrevDeclInScope(OMPDeclareMapperDecl *Prev) {
+    PrevDeclInScope = Prev;
+  }
+
+public:
+  /// Creates declare mapper node.
+  static OMPDeclareMapperDecl *
+  Create(ASTContext &C, DeclContext *DC, SourceLocation L, DeclarationName Name,
+         QualType T, OMPDeclareMapperDecl *PrevDeclInScope, unsigned NC);
+  /// Creates deserialized declare mapper node.
+  static OMPDeclareMapperDecl *CreateDeserialized(ASTContext &C, unsigned ID,
+                                                  unsigned N);
+
+  /// Sets an array of clauses to this mapper declaration
+  void setClauses(ArrayRef<OMPClause *> CL);
+
+  using clauselist_iterator = MutableArrayRef<OMPClause *>::iterator;
+  using clauselist_const_iterator = ArrayRef<const OMPClause *>::iterator;
+  using clauselist_range = llvm::iterator_range<clauselist_iterator>;
+  using clauselist_const_range =
+      llvm::iterator_range<clauselist_const_iterator>;
+
+  unsigned clauselist_size() const { return NumClauses; }
+  bool clauselist_empty() const { return NumClauses == 0; }
+
+  clauselist_range clauselists() {
+    return clauselist_range(clauselist_begin(), clauselist_end());
+  }
+  clauselist_const_range clauselists() const {
+    return clauselist_const_range(clauselist_begin(), clauselist_end());
+  }
+  clauselist_iterator clauselist_begin() { return getClauses().begin(); }
+  clauselist_iterator clauselist_end() { return getClauses().end(); }
+  clauselist_const_iterator clauselist_begin() const {
+    return getClauses().begin();
+  }
+  clauselist_const_iterator clauselist_end() const {
+    return getClauses().end();
+  }
+
+  /// Get reference to previous declare reduction construct in the same
+  /// scope with the same name.
+  OMPDeclareMapperDecl *getPrevDeclInScope() {
+    return cast_or_null<OMPDeclareMapperDecl>(
+        PrevDeclInScope.get(getASTContext().getExternalSource()));
+  }
+  const OMPDeclareMapperDecl *getPrevDeclInScope() const {
+    return cast_or_null<OMPDeclareMapperDecl>(
+        PrevDeclInScope.get(getASTContext().getExternalSource()));
+  }
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == OMPDeclareMapper; }
+  static DeclContext *castToDeclContext(const OMPDeclareMapperDecl *D) {
+    return static_cast<DeclContext *>(const_cast<OMPDeclareMapperDecl *>(D));
+  }
+  static OMPDeclareMapperDecl *castFromDeclContext(const DeclContext *DC) {
+    return static_cast<OMPDeclareMapperDecl *>(const_cast<DeclContext *>(DC));
+  }
+};
+
 /// Pseudo declaration for capturing expressions. Also is used for capturing of
 /// non-static data members in non-static member functions.
 ///

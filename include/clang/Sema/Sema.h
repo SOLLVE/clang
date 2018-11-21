@@ -8775,6 +8775,20 @@ public:
   DeclGroupPtrTy ActOnOpenMPDeclareReductionDirectiveEnd(
       Scope *S, DeclGroupPtrTy DeclReductions, bool IsValid);
 
+  /// Check if the specified type is allowed to be used in 'omp declare
+  /// mapper' construct.
+  QualType ActOnOpenMPDeclareMapperType(Scope *S, Declarator &D);
+  /// Called on start of '#pragma omp declare mapper'.
+  OMPDeclareMapperDecl *ActOnOpenMPDeclareMapperDirectiveStart(
+      Scope *S, DeclContext *DC, DeclarationName Name, QualType MapperType,
+      SourceLocation StartLoc, AccessSpecifier AS,
+      Decl *PrevDeclInScope = nullptr);
+  /// Called at the end of '#pragma omp declare mapper'.
+  DeclGroupPtrTy ActOnOpenMPDeclareMapperDirectiveEnd(
+      OMPDeclareMapperDecl *D, Scope *S, DeclContext *DC, DeclarationName Name,
+      QualType MapperType, SourceLocation StartLoc, AccessSpecifier AS,
+      ArrayRef<OMPClause *> ClauseList, Decl *PrevDeclInScope = nullptr);
+
   /// Called on the start of target region i.e. '#pragma omp declare target'.
   bool ActOnStartOpenMPDeclareTargetDirective(SourceLocation Loc);
   /// Called at the end of target region i.e. '#pragme omp end declare target'.

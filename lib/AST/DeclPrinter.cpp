@@ -102,6 +102,7 @@ namespace {
     void VisitOMPThreadPrivateDecl(OMPThreadPrivateDecl *D);
     void VisitOMPRequiresDecl(OMPRequiresDecl *D);
     void VisitOMPDeclareReductionDecl(OMPDeclareReductionDecl *D);
+    void VisitOMPDeclareMapperDecl(OMPDeclareMapperDecl *D);
     void VisitOMPCapturedExprDecl(OMPCapturedExprDecl *D);
 
     void printTemplateParameters(const TemplateParameterList *Params);
@@ -1594,6 +1595,25 @@ void DeclPrinter::VisitOMPDeclareReductionDecl(OMPDeclareReductionDecl *D) {
       if (D->getInitializerKind() == OMPDeclareReductionDecl::DirectInit)
         Out << ")";
       Out << ")";
+    }
+  }
+}
+
+void DeclPrinter::VisitOMPDeclareMapperDecl(OMPDeclareMapperDecl *D) {
+  if (!D->isInvalidDecl()) {
+    Out << "#pragma omp declare mapper (";
+    //assert(D->getDeclName().isIdentifier());
+    D->printName(Out);
+    Out << " : ";
+    D->getType().print(Out, Policy);
+    Out << " ";
+    // FIXME
+    D->printName(Out);
+    Out << ")";
+    if (!D->clauselist_empty()) {
+      OMPClausePrinter Printer(Out, Policy);
+      for (auto I = D->clauselist_begin(), E = D->clauselist_end(); I != E; ++I)
+        Printer.Visit(*I);
     }
   }
 }

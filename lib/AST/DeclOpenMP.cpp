@@ -124,6 +124,39 @@ OMPDeclareReductionDecl::getPrevDeclInScope() const {
 }
 
 //===----------------------------------------------------------------------===//
+// OMPDeclareMapperDecl Implementation.
+//===----------------------------------------------------------------------===//
+
+void OMPDeclareMapperDecl::anchor() {}
+
+OMPDeclareMapperDecl *OMPDeclareMapperDecl::Create(
+    ASTContext &C, DeclContext *DC, SourceLocation L, DeclarationName Name,
+    QualType T, OMPDeclareMapperDecl *PrevDeclInScope, unsigned NC) {
+  OMPDeclareMapperDecl *D = new (C, DC, additionalSizeToAlloc<OMPClause *>(NC))
+      OMPDeclareMapperDecl(OMPDeclareMapper, DC, L, Name, T, PrevDeclInScope);
+  D->NumClauses = NC;
+  return D;
+}
+
+OMPDeclareMapperDecl *OMPDeclareMapperDecl::CreateDeserialized(ASTContext &C,
+                                                               unsigned ID,
+                                                               unsigned N) {
+  OMPDeclareMapperDecl *D = new (C, ID, additionalSizeToAlloc<OMPClause *>(N))
+      OMPDeclareMapperDecl(OMPDeclareMapper, /*DC=*/nullptr, SourceLocation(),
+                           DeclarationName(), QualType(),
+                           /*PrevDeclInScope=*/nullptr);
+  D->NumClauses = N;
+  return D;
+}
+
+void OMPDeclareMapperDecl::setClauses(ArrayRef<OMPClause *> CL) {
+  assert(CL.size() == NumClauses &&
+         "Number of clauses is not the same as the preallocated buffer");
+  std::uninitialized_copy(CL.begin(), CL.end(),
+                          getTrailingObjects<OMPClause *>());
+}
+
+//===----------------------------------------------------------------------===//
 // OMPCapturedExprDecl Implementation.
 //===----------------------------------------------------------------------===//
 

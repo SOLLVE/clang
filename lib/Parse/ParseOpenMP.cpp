@@ -41,7 +41,8 @@ enum OpenMPDirectiveKindEx {
   OMPD_update,
   OMPD_distribute_parallel,
   OMPD_teams_distribute_parallel,
-  OMPD_target_teams_distribute_parallel
+  OMPD_target_teams_distribute_parallel,
+  OMPD_mapper
 };
 
 class ThreadprivateListParserHelper final {
@@ -77,6 +78,7 @@ static unsigned getOpenMPDirectiveKindEx(StringRef S) {
       .Case("point", OMPD_point)
       .Case("reduction", OMPD_reduction)
       .Case("update", OMPD_update)
+      .Case("mapper", OMPD_mapper)
       .Default(OMPD_unknown);
 }
 
@@ -87,6 +89,7 @@ static OpenMPDirectiveKind parseOpenMPDirectiveKind(Parser &P) {
   static const unsigned F[][3] = {
       {OMPD_cancellation, OMPD_point, OMPD_cancellation_point},
       {OMPD_declare, OMPD_reduction, OMPD_declare_reduction},
+      {OMPD_declare, OMPD_mapper, OMPD_declare_mapper},
       {OMPD_declare, OMPD_simd, OMPD_declare_simd},
       {OMPD_declare, OMPD_target, OMPD_declare_target},
       {OMPD_distribute, OMPD_parallel, OMPD_distribute_parallel},
@@ -470,6 +473,143 @@ void Parser::ParseOpenMPReductionInitializerForDecl(VarDecl *OmpPrivParm) {
   }
 }
 
+/// Parses 'omp declare mapper' directive.
+///
+///       declare-mapper-directive:
+///         annot_pragma_openmp 'declare' 'mapper' '(' [<mapper-identifier> ':']
+///         <type> <var> ')' [<clause>[[,] <clause>] ... ]
+///         annot_pragma_openmp_end
+/// <mapper-identifier> and <var> are base language identifiers.
+///
+#include <iostream>
+Parser::DeclGroupPtrTy
+Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
+  bool IsCorrect = true;
+  // Parse '('
+  BalancedDelimiterTracker T(*this, tok::l_paren, tok::annot_pragma_openmp_end);
+  if (T.expectAndConsume(diag::err_expected_lparen_after,
+                         getOpenMPDirectiveName(OMPD_declare_mapper))) {
+    SkipUntil(tok::annot_pragma_openmp_end, StopBeforeMatch);
+    return DeclGroupPtrTy();
+  }
+
+  // Parse <mapper-identifier>
+  auto &DeclNames = Actions.getASTContext().DeclarationNames;
+  DeclarationName MapperId;
+  if (PP.LookAhead(0).is(tok::colon)) {
+    std::cout << "DBG: " << Tok.getName() << std::endl;
+    if (Tok.isNot(tok::identifier) && Tok.isNot(tok::kw_default)) {
+      Diag(Tok.getLocation(), diag::err_omp_expected_mapper_identifier) << 0;
+      IsCorrect = false;
+      SkipUntil(tok::colon, tok::r_paren, tok::annot_pragma_openmp_end,
+                Parser::StopBeforeMatch);
+      return DeclGroupPtrTy();
+    }
+    MapperId = DeclNames.getIdentifier(Tok.getIdentifierInfo());
+    ConsumeToken();
+    // Consume ':'.
+    IsCorrect = !ExpectAndConsume(tok::colon);
+  } else {
+    // FIXME: lld no identifier case
+  }
+
+  // Parse <type> <var>
+  //ColonProtectionRAIIObject ColonRAII(*this);
+  std::cout << "DBG: " << Tok.getName() << std::endl;
+  DeclarationName Name;
+  SourceRange Range;
+  QualType MapperType = parseOpenMPDeclareMapperDecl(&Range, AS);
+  // ParseTypeName(&Range, DeclaratorContext::PrototypeContext, AS);
+  if (MapperType.isNull()) {
+    Diag(Tok.getLocation(), diag::err_omp_expected_mapper_identifier) << 0;
+    IsCorrect = false;
+    SkipUntil(tok::annot_pragma_openmp_end, Parser::StopBeforeMatch);
+    return DeclGroupPtrTy();
+  }
+  std::cout << "DBG: " << MapperType.getAsString() << std::endl;
+  Name = DeclNames.getIdentifier(Tok.getIdentifierInfo());
+  std::cout << "DBG: " << Name.getAsString() << std::endl;
+  // Consume ')'.
+  T.consumeClose();
+
+  //// Parse <var>
+  //std::cout << "DBG: " << Tok.getName() << std::endl;
+  //if (Tok.isNot(tok::identifier)) {
+  //  Diag(Tok.getLocation(), diag::err_omp_expected_mapper_identifier) << 1;
+  //  IsCorrect = false;
+  //  SkipUntil(tok::colon, tok::r_paren, tok::annot_pragma_openmp_end,
+  //            Parser::StopBeforeMatch);
+  //  return DeclGroupPtrTy();
+  //}
+
+  //SourceLocation DeclStart = Tok.getLocation(), DeclEnd;
+  //DeclGroupPtrTy DG = ParseSimpleDeclaration(
+  //    DeclaratorContext::PrototypeContext, DeclEnd, Attrs, false, nullptr);
+  //StmtResult SR = Actions.ActOnDeclStmt(DG, DeclStart, Tok.getLocation());
+
+  OMPDeclareMapperDecl *DMD = Actions.ActOnOpenMPDeclareMapperDirectiveStart(
+      getCurScope(), Actions.getCurLexicalContext(), MapperId, MapperType,
+      Range.getBegin(), AS);
+
+  std::cout << "MDBG: " << Tok.getName() << std::endl;
+  // Parse map clauses
+  SmallVector<OMPClause *, 8> Clauses;
+  while (Tok.isNot(tok::annot_pragma_openmp_end)) {
+    OpenMPClauseKind CKind = Tok.isAnnotation()
+                                 ? OMPC_unknown
+                                 : getOpenMPClauseKind(PP.getSpelling(Tok));
+    Actions.StartOpenMPClause(CKind);
+    OMPClause *Clause =
+        ParseOpenMPClause(OMPD_declare_mapper, CKind, Clauses.size() == 0);
+    SkipUntil(tok::comma, tok::annot_pragma_openmp_end, StopBeforeMatch);
+    if (Clause != nullptr)
+      Clauses.push_back(Clause);
+    // Skip ',' if any
+    if (Tok.is(tok::comma))
+      ConsumeToken();
+    Actions.EndOpenMPClause();
+  }
+  if (Clauses.size() == 0) {
+    Diag(Tok, diag::err_omp_expected_clause)
+        << getOpenMPDirectiveName(OMPD_declare_mapper);
+    IsCorrect = false;
+  }
+  std::cout << "MDBG: " << Tok.getName() << std::endl;
+
+  if (!IsCorrect)
+    return DeclGroupPtrTy();
+
+  DeclGroupPtrTy DGP = Actions.ActOnOpenMPDeclareMapperDirectiveEnd(
+      DMD, getCurScope(), Actions.getCurLexicalContext(), MapperId,
+      MapperType, Range.getBegin(), AS, Clauses);
+
+  return DGP;
+}
+
+QualType Parser::parseOpenMPDeclareMapperDecl(SourceRange *Range,
+                                                     AccessSpecifier AS) {
+  // Parse the common declaration-specifiers piece.
+  Parser::DeclSpecContext DSC = Parser::DeclSpecContext::DSC_type_specifier;
+  DeclSpec DS(AttrFactory);
+  ParseSpecifierQualifierList(DS, AS, DSC);
+
+  auto &DeclNames = Actions.getASTContext().DeclarationNames;
+  std::cout << "MDeclDBG: " << Tok.getName() << std::endl;
+  auto Name = DeclNames.getIdentifier(Tok.getIdentifierInfo());
+  std::cout << "MDeclDBG: " << Name.getAsString() << std::endl;
+  // Parse the declarator.
+  DeclaratorContext Context = DeclaratorContext::PrototypeContext;
+  Declarator DeclaratorInfo(DS, Context);
+  ParseDeclarator(DeclaratorInfo);
+  assert(Range);
+  *Range = DeclaratorInfo.getSourceRange();
+
+  if (DeclaratorInfo.isInvalidType())
+    return QualType();
+
+  return Actions.ActOnOpenMPDeclareMapperType(getCurScope(), DeclaratorInfo);
+}
+
 namespace {
 /// RAII that recreates function context for correct parsing of clauses of
 /// 'declare simd' construct.
@@ -654,6 +794,11 @@ Parser::ParseOMPDeclareSimdClauses(Parser::DeclGroupPtrTy Ptr,
 ///        annot_pragma_openmp 'declare' 'reduction' [...]
 ///        annot_pragma_openmp_end
 ///
+///       declare-mapper-directive:
+///         annot_pragma_openmp 'declare' 'mapper' '(' [<mapper-identifer> ':']
+///         <type> <expression> ')' [<clause>[[,] <clause>] ... ]
+///         annot_pragma_openmp_end
+///
 ///       declare-simd-directive:
 ///         annot_pragma_openmp 'declare simd' {<clause> [,]}
 ///         annot_pragma_openmp_end
@@ -747,6 +892,15 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
       return Res;
     }
     break;
+  case OMPD_declare_mapper: {
+    ConsumeToken();
+    if (DeclGroupPtrTy Res = ParseOpenMPDeclareMapperDirective(AS)) {
+      // Skip the last annot_pragma_openmp_end.
+      ConsumeAnnotationToken();
+      return Res;
+    }
+    break;
+  }
   case OMPD_declare_simd: {
     // The syntax is:
     // { #pragma omp declare simd }
@@ -1029,6 +1183,18 @@ StmtResult Parser::ParseOpenMPDeclarativeOrExecutableDirective(
       SkipUntil(tok::annot_pragma_openmp_end);
     }
     break;
+  case OMPD_declare_mapper: {
+    ConsumeToken();
+    if (DeclGroupPtrTy Res =
+            ParseOpenMPDeclareMapperDirective(/*AS=*/AS_none)) {
+      // Skip the last annot_pragma_openmp_end.
+      ConsumeAnnotationToken();
+      Directive = Actions.ActOnDeclStmt(Res, Loc, Tok.getLocation());
+    } else {
+      SkipUntil(tok::annot_pragma_openmp_end);
+    }
+    break;
+  }
   case OMPD_flush:
     if (PP.LookAhead(0).is(tok::l_paren)) {
       FlushHasClause = true;

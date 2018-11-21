@@ -2778,6 +2778,12 @@ private:
   /// initializer.
   void ParseOpenMPReductionInitializerForDecl(VarDecl *OmpPrivParm);
 
+  /// Parses 'omp declare mapper' directive.
+  DeclGroupPtrTy ParseOpenMPDeclareMapperDirective(AccessSpecifier AS);
+  /// Parses variable declaration in 'omp declare mapper' directive.
+  QualType parseOpenMPDeclareMapperDecl(SourceRange *Range,
+                                          AccessSpecifier AS = AS_none);
+
   /// Parses simple list of variables.
   ///
   /// \param Kind Kind of the directive.

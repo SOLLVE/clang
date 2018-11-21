@@ -450,6 +450,7 @@ namespace  {
     // OpenMP decls
     void VisitOMPThreadPrivateDecl(const OMPThreadPrivateDecl *D);
     void VisitOMPDeclareReductionDecl(const OMPDeclareReductionDecl *D);
+    void VisitOMPDeclareMapperDecl(const OMPDeclareMapperDecl *D);
     void VisitOMPRequiresDecl(const OMPRequiresDecl *D);
     void VisitOMPCapturedExprDecl(const OMPCapturedExprDecl *D);
 
@@ -1342,6 +1343,30 @@ void ASTDumper::VisitOMPDeclareReductionDecl(const OMPDeclareReductionDecl *D) {
       break;
     }
     dumpStmt(Initializer);
+  }
+}
+
+void ASTDumper::VisitOMPDeclareMapperDecl(const OMPDeclareMapperDecl *D) {
+  for (auto *C : D->clauselists()) {
+    dumpChild([=] {
+      if (!C) {
+        ColorScope Color(*this, NullColor);
+        OS << "<<<NULL>>> OMPClause";
+        return;
+      }
+      {
+        ColorScope Color(*this, AttrColor);
+        StringRef ClauseName(getOpenMPClauseName(C->getClauseKind()));
+        OS << "OMP" << ClauseName.substr(/*Start=*/0, /*N=*/1).upper()
+           << ClauseName.drop_front() << "Clause";
+      }
+      dumpPointer(C);
+      dumpSourceRange(SourceRange(C->getBeginLoc(), C->getEndLoc()));
+      if (C->isImplicit())
+        OS << " <implicit>";
+      for (auto *S : C->children())
+        dumpStmt(S);
+    });
   }
 }
 
