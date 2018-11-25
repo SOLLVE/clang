@@ -8781,8 +8781,13 @@ public:
   /// Called on start of '#pragma omp declare mapper'.
   OMPDeclareMapperDecl *ActOnOpenMPDeclareMapperDirectiveStart(
       Scope *S, DeclContext *DC, DeclarationName Name, QualType MapperType,
-      SourceLocation StartLoc, AccessSpecifier AS,
+      SourceLocation StartLoc, DeclarationName VN, AccessSpecifier AS,
       Decl *PrevDeclInScope = nullptr);
+  /// Build the mapper variable of '#pragma omp declare mapper'.
+  void ActOnOpenMPDeclareMapperDirectiveVarDecl(OMPDeclareMapperDecl *DMD,
+                                                Scope *S, QualType MapperType,
+                                                SourceLocation StartLoc,
+                                                DeclarationName VN);
   /// Called at the end of '#pragma omp declare mapper'.
   DeclGroupPtrTy ActOnOpenMPDeclareMapperDirectiveEnd(
       OMPDeclareMapperDecl *D, Scope *S, DeclContext *DC, DeclarationName Name,

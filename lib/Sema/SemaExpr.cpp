@@ -2866,6 +2866,7 @@ ExprResult Sema::BuildDeclarationNameExpr(
     case Decl::EnumConstant:
     case Decl::UnresolvedUsingValue:
     case Decl::OMPDeclareReduction:
+    case Decl::OMPDeclareMapper:
       valueKind = VK_RValue;
       break;
 

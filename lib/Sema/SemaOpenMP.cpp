@@ -2733,6 +2733,7 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   case OMPD_cancel:
   case OMPD_flush:
   case OMPD_declare_reduction:
+  case OMPD_declare_mapper:
   case OMPD_declare_simd:
   case OMPD_declare_target:
   case OMPD_end_declare_target:
@@ -3577,6 +3578,7 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
   case OMPD_end_declare_target:
   case OMPD_threadprivate:
   case OMPD_declare_reduction:
+  case OMPD_declare_mapper:
   case OMPD_declare_simd:
   case OMPD_requires:
     llvm_unreachable("OpenMP Directive is not allowed");
@@ -8242,6 +8244,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_cancellation_point:
     case OMPD_flush:
     case OMPD_declare_reduction:
+    case OMPD_declare_mapper:
     case OMPD_declare_simd:
     case OMPD_declare_target:
     case OMPD_end_declare_target:
@@ -8308,6 +8311,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_cancellation_point:
     case OMPD_flush:
     case OMPD_declare_reduction:
+    case OMPD_declare_mapper:
     case OMPD_declare_simd:
     case OMPD_declare_target:
     case OMPD_end_declare_target:
@@ -8375,6 +8379,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_cancellation_point:
     case OMPD_flush:
     case OMPD_declare_reduction:
+    case OMPD_declare_mapper:
     case OMPD_declare_simd:
     case OMPD_declare_target:
     case OMPD_end_declare_target:
@@ -8439,6 +8444,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_cancellation_point:
     case OMPD_flush:
     case OMPD_declare_reduction:
+    case OMPD_declare_mapper:
     case OMPD_declare_simd:
     case OMPD_declare_target:
     case OMPD_end_declare_target:
@@ -8504,6 +8510,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_cancellation_point:
     case OMPD_flush:
     case OMPD_declare_reduction:
+    case OMPD_declare_mapper:
     case OMPD_declare_simd:
     case OMPD_declare_target:
     case OMPD_end_declare_target:
@@ -8568,6 +8575,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_cancellation_point:
     case OMPD_flush:
     case OMPD_declare_reduction:
+    case OMPD_declare_mapper:
     case OMPD_declare_simd:
     case OMPD_declare_target:
     case OMPD_end_declare_target:
@@ -8631,6 +8639,7 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_cancellation_point:
     case OMPD_flush:
     case OMPD_declare_reduction:
+    case OMPD_declare_mapper:
     case OMPD_declare_simd:
     case OMPD_declare_target:
     case OMPD_end_declare_target:
@@ -13185,6 +13194,7 @@ Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareReductionDirectiveEnd(
   return DeclReductions;
 }
 
+#include <iostream>
 QualType Sema::ActOnOpenMPDeclareMapperType(Scope *S, Declarator &D) {
   TypeSourceInfo *TInfo = GetTypeForDeclarator(D, S);
   QualType T = TInfo->getType();
@@ -13241,9 +13251,10 @@ QualType Sema::ActOnOpenMPDeclareMapperType(Scope *S, Declarator &D) {
 
 OMPDeclareMapperDecl *Sema::ActOnOpenMPDeclareMapperDirectiveStart(
     Scope *S, DeclContext *DC, DeclarationName Name, QualType MapperType,
-    SourceLocation StartLoc, AccessSpecifier AS, Decl *PrevDeclInScope) {
-  LookupResult Lookup(*this, Name, SourceLocation(), LookupOMPReductionName,
-                      forRedeclarationInCurContext());
+    SourceLocation StartLoc, DeclarationName VN, AccessSpecifier AS,
+    Decl *PrevDeclInScope) {
+  //LookupResult Lookup(*this, Name, SourceLocation(), LookupOMPReductionName,
+  //                    forRedeclarationInCurContext());
   //// [OpenMP 4.0], 2.15 declare reduction Directive, Restrictions
   //// A reduction-identifier may not be re-declared in the current scope for the
   //// same type or for a type that is compatible according to the base language
@@ -13316,10 +13327,26 @@ OMPDeclareMapperDecl *Sema::ActOnOpenMPDeclareMapperDirectiveStart(
   // FIXME: lld numclause is not correct
   auto *DMD = OMPDeclareMapperDecl::Create(Context, DC, StartLoc, Name,
                                            MapperType, PrevDMD, 1);
-  if (S)
-    PushOnScopeChains(DMD, S, /*AddToContext=*/false);
+  // Enter new function scope.
+  PushFunctionScope();
+  setFunctionHasBranchProtectedScope();
+
+  if (S != nullptr)
+    PushDeclContext(S, DMD);
   else
-    CurContext->addDecl(DMD);
+    CurContext = DMD;
+
+  PushExpressionEvaluationContext(
+      ExpressionEvaluationContext::PotentiallyEvaluated);
+
+  //std::cerr << "Sema: " << VN.getAsString() << std::endl;
+  //VarDecl *VD = buildVarDecl(*this, StartLoc, MapperType, VN.getAsString());
+  //if (S)
+  //  PushOnScopeChains(VD, S);
+  //else
+  //  DMD->addDecl(VD);
+  ////Expr *VDRE = buildDeclRefExpr(*this, VD, MapperType, StartLoc);
+
   return DMD;
   //auto *DRD = cast<OMPDeclareReductionDecl>(D);
 
@@ -13338,6 +13365,20 @@ OMPDeclareMapperDecl *Sema::ActOnOpenMPDeclareMapperDirectiveStart(
   //return;
 }
 
+void Sema::ActOnOpenMPDeclareMapperDirectiveVarDecl(OMPDeclareMapperDecl *DMD,
+                                                    Scope *S,
+                                                    QualType MapperType,
+                                                    SourceLocation StartLoc,
+                                                    DeclarationName VN) {
+  std::cerr << "Sema: " << VN.getAsString() << std::endl;
+  VarDecl *VD = buildVarDecl(*this, StartLoc, MapperType, VN.getAsString());
+  if (S)
+    PushOnScopeChains(VD, S);
+  else
+    DMD->addDecl(VD);
+  // Expr *VDRE = buildDeclRefExpr(*this, VD, MapperType, StartLoc);
+}
+
 Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareMapperDirectiveEnd(
     OMPDeclareMapperDecl *D, Scope *S, DeclContext *DC, DeclarationName Name,
     QualType MapperType, SourceLocation StartLoc, AccessSpecifier AS,
@@ -13352,6 +13393,24 @@ Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareMapperDirectiveEnd(
   //    DSAStack->addRequiresDecl(D);
   //  }
   //}
+  std::cerr << "Sema: mapper end" << std::endl;
+  DiscardCleanupsInEvaluationContext();
+  PopExpressionEvaluationContext();
+
+  PopDeclContext();
+  PopFunctionScopeInfo();
+
+  if (D) {
+    if (S) {
+      // PushOnScopeChains(DMD, S, /*AddToContext=*/false); // FIXME??
+      // CurContext->addDecl(D);
+      PushOnScopeChains(D, S);
+      std::cerr << "Sema: add mapper decl" << std::endl;
+    } else
+      CurContext->addDecl(D);
+      std::cerr << "Sema: add mapper decl" << std::endl;
+  }
+
   D->setClauses(ClauseList);
   return DeclGroupPtrTy::make(DeclGroupRef(D));
 }

@@ -2782,7 +2782,8 @@ private:
   DeclGroupPtrTy ParseOpenMPDeclareMapperDirective(AccessSpecifier AS);
   /// Parses variable declaration in 'omp declare mapper' directive.
   QualType parseOpenMPDeclareMapperDecl(SourceRange *Range,
-                                          AccessSpecifier AS = AS_none);
+                                        DeclarationName &Name,
+                                        AccessSpecifier AS = AS_none);
 
   /// Parses simple list of variables.
   ///

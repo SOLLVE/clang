@@ -1347,6 +1347,7 @@ void ASTDumper::VisitOMPDeclareReductionDecl(const OMPDeclareReductionDecl *D) {
 }
 
 void ASTDumper::VisitOMPDeclareMapperDecl(const OMPDeclareMapperDecl *D) {
+  dumpName(D);
   for (auto *C : D->clauselists()) {
     dumpChild([=] {
       if (!C) {

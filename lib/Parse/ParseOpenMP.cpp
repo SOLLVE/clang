@@ -484,6 +484,8 @@ void Parser::ParseOpenMPReductionInitializerForDecl(VarDecl *OmpPrivParm) {
 #include <iostream>
 Parser::DeclGroupPtrTy
 Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
+  unsigned ScopeFlags = Scope::FnScope | Scope::DeclScope |
+                        Scope::CompoundStmtScope | Scope::OpenMPDirectiveScope;
   bool IsCorrect = true;
   // Parse '('
   BalancedDelimiterTracker T(*this, tok::l_paren, tok::annot_pragma_openmp_end);
@@ -503,10 +505,10 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
       IsCorrect = false;
       SkipUntil(tok::colon, tok::r_paren, tok::annot_pragma_openmp_end,
                 Parser::StopBeforeMatch);
-      return DeclGroupPtrTy();
+    } else {
+      MapperId = DeclNames.getIdentifier(Tok.getIdentifierInfo());
+      ConsumeToken();
     }
-    MapperId = DeclNames.getIdentifier(Tok.getIdentifierInfo());
-    ConsumeToken();
     // Consume ':'.
     IsCorrect = !ExpectAndConsume(tok::colon);
   } else {
@@ -516,9 +518,9 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   // Parse <type> <var>
   //ColonProtectionRAIIObject ColonRAII(*this);
   std::cout << "DBG: " << Tok.getName() << std::endl;
-  DeclarationName Name;
+  DeclarationName VName;
   SourceRange Range;
-  QualType MapperType = parseOpenMPDeclareMapperDecl(&Range, AS);
+  QualType MapperType = parseOpenMPDeclareMapperDecl(&Range, VName, AS);
   // ParseTypeName(&Range, DeclaratorContext::PrototypeContext, AS);
   if (MapperType.isNull()) {
     Diag(Tok.getLocation(), diag::err_omp_expected_mapper_identifier) << 0;
@@ -527,8 +529,6 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
     return DeclGroupPtrTy();
   }
   std::cout << "DBG: " << MapperType.getAsString() << std::endl;
-  Name = DeclNames.getIdentifier(Tok.getIdentifierInfo());
-  std::cout << "DBG: " << Name.getAsString() << std::endl;
   // Consume ')'.
   T.consumeClose();
 
@@ -549,7 +549,15 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
 
   OMPDeclareMapperDecl *DMD = Actions.ActOnOpenMPDeclareMapperDirectiveStart(
       getCurScope(), Actions.getCurLexicalContext(), MapperId, MapperType,
-      Range.getBegin(), AS);
+      Range.getBegin(), VName, AS);
+
+  DeclarationNameInfo DirName;
+  SourceLocation Loc = Tok.getLocation();
+  ParseScope OMPDirectiveScope(this, ScopeFlags);
+  Actions.StartOpenMPDSABlock(OMPD_declare_mapper, DirName, getCurScope(), Loc);
+
+  Actions.ActOnOpenMPDeclareMapperDirectiveVarDecl(
+      DMD, getCurScope(), MapperType, Range.getBegin(), VName);
 
   std::cout << "MDBG: " << Tok.getName() << std::endl;
   // Parse map clauses
@@ -576,18 +584,22 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   }
   std::cout << "MDBG: " << Tok.getName() << std::endl;
 
-  if (!IsCorrect)
-    return DeclGroupPtrTy();
+  //if (!IsCorrect)
+  //  return DeclGroupPtrTy();
+
+  // Exit scope.
+  Actions.EndOpenMPDSABlock(nullptr);
+  OMPDirectiveScope.Exit();
 
   DeclGroupPtrTy DGP = Actions.ActOnOpenMPDeclareMapperDirectiveEnd(
       DMD, getCurScope(), Actions.getCurLexicalContext(), MapperId,
       MapperType, Range.getBegin(), AS, Clauses);
-
   return DGP;
 }
 
 QualType Parser::parseOpenMPDeclareMapperDecl(SourceRange *Range,
-                                                     AccessSpecifier AS) {
+                                              DeclarationName &Name,
+                                              AccessSpecifier AS) {
   // Parse the common declaration-specifiers piece.
   Parser::DeclSpecContext DSC = Parser::DeclSpecContext::DSC_type_specifier;
   DeclSpec DS(AttrFactory);
@@ -595,7 +607,7 @@ QualType Parser::parseOpenMPDeclareMapperDecl(SourceRange *Range,
 
   auto &DeclNames = Actions.getASTContext().DeclarationNames;
   std::cout << "MDeclDBG: " << Tok.getName() << std::endl;
-  auto Name = DeclNames.getIdentifier(Tok.getIdentifierInfo());
+  Name = DeclNames.getIdentifier(Tok.getIdentifierInfo());
   std::cout << "MDeclDBG: " << Name.getAsString() << std::endl;
   // Parse the declarator.
   DeclaratorContext Context = DeclaratorContext::PrototypeContext;
