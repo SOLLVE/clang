@@ -425,7 +425,7 @@ void DeclPrinter::VisitDeclContext(DeclContext *DC, bool Indent) {
     // FIXME: Need to be able to tell the DeclPrinter when
     const char *Terminator = nullptr;
     if (isa<OMPThreadPrivateDecl>(*D) || isa<OMPDeclareReductionDecl>(*D) ||
-        isa<OMPRequiresDecl>(*D))
+        isa<OMPDeclareMapperDecl>(*D) || isa<OMPRequiresDecl>(*D))
       Terminator = nullptr;
     else if (isa<ObjCMethodDecl>(*D) && cast<ObjCMethodDecl>(*D)->hasBody())
       Terminator = nullptr;
@@ -1602,18 +1602,19 @@ void DeclPrinter::VisitOMPDeclareReductionDecl(OMPDeclareReductionDecl *D) {
 void DeclPrinter::VisitOMPDeclareMapperDecl(OMPDeclareMapperDecl *D) {
   if (!D->isInvalidDecl()) {
     Out << "#pragma omp declare mapper (";
-    //assert(D->getDeclName().isIdentifier());
     D->printName(Out);
     Out << " : ";
     D->getType().print(Out, Policy);
     Out << " ";
-    // FIXME
-    D->printName(Out);
+    Out << D->getVarName();
     Out << ")";
     if (!D->clauselist_empty()) {
       OMPClausePrinter Printer(Out, Policy);
-      for (auto I = D->clauselist_begin(), E = D->clauselist_end(); I != E; ++I)
+      for (auto I = D->clauselist_begin(), E = D->clauselist_end(); I != E;
+           ++I) {
+        Out << " ";
         Printer.Visit(*I);
+      }
     }
   }
 }

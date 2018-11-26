@@ -222,8 +222,14 @@ class OMPDeclareMapperDecl final
   friend class ASTDeclReader;
   friend TrailingObjects;
 
+  // Clauses assoicated with this mapper declaration
+  OMPClause **Clauses = nullptr;
+
   // Number of clauses associated with this mapper declaration
   unsigned NumClauses = 0;
+
+  // Name of the mapper variable
+  DeclarationName VarName;
 
   LazyDeclPtr PrevDeclInScope;
 
@@ -231,20 +237,28 @@ class OMPDeclareMapperDecl final
 
   OMPDeclareMapperDecl(Kind DK, DeclContext *DC, SourceLocation L,
                        DeclarationName Name, QualType Ty,
+                       DeclarationName VarName,
                        OMPDeclareMapperDecl *PrevDeclInScope)
-      : ValueDecl(DK, DC, L, Name, Ty), DeclContext(DK), NumClauses(0),
+      : ValueDecl(DK, DC, L, Name, Ty), DeclContext(DK), VarName(VarName),
         PrevDeclInScope(PrevDeclInScope) {}
+
+  ~OMPDeclareMapperDecl() {
+    if (Clauses)
+      delete[] Clauses;
+  }
 
   /// Returns an array of immutable clauses associated with this mapper
   /// declaration
   ArrayRef<const OMPClause *> getClauses() const {
-    return llvm::makeArrayRef(getTrailingObjects<OMPClause *>(), NumClauses);
+    //return llvm::makeArrayRef(getTrailingObjects<OMPClause *>(), NumClauses);
+    return llvm::makeArrayRef(Clauses, NumClauses);
   }
 
   /// Returns an array of clauses associated with this mapper declaration
   MutableArrayRef<OMPClause *> getClauses() {
-    return MutableArrayRef<OMPClause *>(getTrailingObjects<OMPClause *>(),
-                                        NumClauses);
+    //return MutableArrayRef<OMPClause *>(getTrailingObjects<OMPClause *>(),
+    //                                    NumClauses);
+    return MutableArrayRef<OMPClause *>(Clauses, NumClauses);
   }
 
   void setPrevDeclInScope(OMPDeclareMapperDecl *Prev) {
@@ -253,9 +267,10 @@ class OMPDeclareMapperDecl final
 
 public:
   /// Creates declare mapper node.
-  static OMPDeclareMapperDecl *
-  Create(ASTContext &C, DeclContext *DC, SourceLocation L, DeclarationName Name,
-         QualType T, OMPDeclareMapperDecl *PrevDeclInScope, unsigned NC);
+  static OMPDeclareMapperDecl *Create(ASTContext &C, DeclContext *DC,
+                                      SourceLocation L, DeclarationName Name,
+                                      QualType T, DeclarationName VarName,
+                                      OMPDeclareMapperDecl *PrevDeclInScope);
   /// Creates deserialized declare mapper node.
   static OMPDeclareMapperDecl *CreateDeserialized(ASTContext &C, unsigned ID,
                                                   unsigned N);
@@ -286,6 +301,9 @@ public:
   clauselist_const_iterator clauselist_end() const {
     return getClauses().end();
   }
+
+  /// Get the name of the variable declared in the mapper
+  DeclarationName getVarName() { return VarName; }
 
   /// Get reference to previous declare reduction construct in the same
   /// scope with the same name.

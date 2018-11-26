@@ -13326,7 +13326,7 @@ OMPDeclareMapperDecl *Sema::ActOnOpenMPDeclareMapperDirectiveStart(
   OMPDeclareMapperDecl *PrevDMD = nullptr;
   // FIXME: lld numclause is not correct
   auto *DMD = OMPDeclareMapperDecl::Create(Context, DC, StartLoc, Name,
-                                           MapperType, PrevDMD, 1);
+                                           MapperType, VN, PrevDMD);
   // Enter new function scope.
   PushFunctionScope();
   setFunctionHasBranchProtectedScope();
@@ -13393,7 +13393,7 @@ Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareMapperDirectiveEnd(
   //    DSAStack->addRequiresDecl(D);
   //  }
   //}
-  std::cerr << "Sema: mapper end" << std::endl;
+  std::cerr << "Sema: mapper end clauses_num: " << ClauseList.size() << std::endl;
   DiscardCleanupsInEvaluationContext();
   PopExpressionEvaluationContext();
 
@@ -13405,10 +13405,8 @@ Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareMapperDirectiveEnd(
       // PushOnScopeChains(DMD, S, /*AddToContext=*/false); // FIXME??
       // CurContext->addDecl(D);
       PushOnScopeChains(D, S);
-      std::cerr << "Sema: add mapper decl" << std::endl;
     } else
       CurContext->addDecl(D);
-      std::cerr << "Sema: add mapper decl" << std::endl;
   }
 
   D->setClauses(ClauseList);

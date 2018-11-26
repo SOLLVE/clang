@@ -505,14 +505,16 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
       IsCorrect = false;
       SkipUntil(tok::colon, tok::r_paren, tok::annot_pragma_openmp_end,
                 Parser::StopBeforeMatch);
-    } else {
+    } else
       MapperId = DeclNames.getIdentifier(Tok.getIdentifierInfo());
-      ConsumeToken();
-    }
+    ConsumeToken();
     // Consume ':'.
     IsCorrect = !ExpectAndConsume(tok::colon);
   } else {
     // FIXME: lld no identifier case
+    Token IdTok;
+    IdTok.setKind(tok::kw_default);
+    MapperId = DeclNames.getIdentifier(IdTok.getIdentifierInfo());
   }
 
   // Parse <type> <var>
@@ -559,9 +561,8 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   Actions.ActOnOpenMPDeclareMapperDirectiveVarDecl(
       DMD, getCurScope(), MapperType, Range.getBegin(), VName);
 
-  std::cout << "MDBG: " << Tok.getName() << std::endl;
   // Parse map clauses
-  SmallVector<OMPClause *, 8> Clauses;
+  SmallVector<OMPClause *, 6> Clauses;
   while (Tok.isNot(tok::annot_pragma_openmp_end)) {
     OpenMPClauseKind CKind = Tok.isAnnotation()
                                  ? OMPC_unknown
@@ -569,10 +570,10 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
     Actions.StartOpenMPClause(CKind);
     OMPClause *Clause =
         ParseOpenMPClause(OMPD_declare_mapper, CKind, Clauses.size() == 0);
-    SkipUntil(tok::comma, tok::annot_pragma_openmp_end, StopBeforeMatch);
-    if (Clause != nullptr)
+    //SkipUntil(tok::comma, tok::annot_pragma_openmp_end, StopBeforeMatch);
+    if (Clause)
       Clauses.push_back(Clause);
-    // Skip ',' if any
+    // Skip ',' if any.
     if (Tok.is(tok::comma))
       ConsumeToken();
     Actions.EndOpenMPClause();
@@ -582,7 +583,6 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
         << getOpenMPDirectiveName(OMPD_declare_mapper);
     IsCorrect = false;
   }
-  std::cout << "MDBG: " << Tok.getName() << std::endl;
 
   //if (!IsCorrect)
   //  return DeclGroupPtrTy();
@@ -606,9 +606,7 @@ QualType Parser::parseOpenMPDeclareMapperDecl(SourceRange *Range,
   ParseSpecifierQualifierList(DS, AS, DSC);
 
   auto &DeclNames = Actions.getASTContext().DeclarationNames;
-  std::cout << "MDeclDBG: " << Tok.getName() << std::endl;
   Name = DeclNames.getIdentifier(Tok.getIdentifierInfo());
-  std::cout << "MDeclDBG: " << Name.getAsString() << std::endl;
   // Parse the declarator.
   DeclaratorContext Context = DeclaratorContext::PrototypeContext;
   Declarator DeclaratorInfo(DS, Context);
