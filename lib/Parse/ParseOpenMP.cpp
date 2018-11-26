@@ -511,14 +511,12 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
     // Consume ':'.
     IsCorrect = !ExpectAndConsume(tok::colon);
   } else {
-    // FIXME: lld no identifier case
-    Token IdTok;
-    IdTok.setKind(tok::kw_default);
-    MapperId = DeclNames.getIdentifier(IdTok.getIdentifierInfo());
+    // If no mapper identifier is provided, its name is "default" by default
+    MapperId =
+        DeclNames.getIdentifier(&Actions.getASTContext().Idents.get("default"));
   }
 
   // Parse <type> <var>
-  //ColonProtectionRAIIObject ColonRAII(*this);
   std::cout << "DBG: " << Tok.getName() << std::endl;
   DeclarationName VName;
   SourceRange Range;
@@ -530,7 +528,6 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
     SkipUntil(tok::annot_pragma_openmp_end, Parser::StopBeforeMatch);
     return DeclGroupPtrTy();
   }
-  std::cout << "DBG: " << MapperType.getAsString() << std::endl;
   // Consume ')'.
   T.consumeClose();
 
@@ -549,6 +546,7 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   //    DeclaratorContext::PrototypeContext, DeclEnd, Attrs, false, nullptr);
   //StmtResult SR = Actions.ActOnDeclStmt(DG, DeclStart, Tok.getLocation());
 
+  // Set up correct scopes
   OMPDeclareMapperDecl *DMD = Actions.ActOnOpenMPDeclareMapperDirectiveStart(
       getCurScope(), Actions.getCurLexicalContext(), MapperId, MapperType,
       Range.getBegin(), VName, AS);
@@ -570,9 +568,10 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
     Actions.StartOpenMPClause(CKind);
     OMPClause *Clause =
         ParseOpenMPClause(OMPD_declare_mapper, CKind, Clauses.size() == 0);
-    //SkipUntil(tok::comma, tok::annot_pragma_openmp_end, StopBeforeMatch);
     if (Clause)
       Clauses.push_back(Clause);
+    else
+      IsCorrect = false;
     // Skip ',' if any.
     if (Tok.is(tok::comma))
       ConsumeToken();
@@ -584,9 +583,6 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
     IsCorrect = false;
   }
 
-  //if (!IsCorrect)
-  //  return DeclGroupPtrTy();
-
   // Exit scope.
   Actions.EndOpenMPDSABlock(nullptr);
   OMPDirectiveScope.Exit();
@@ -594,6 +590,9 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   DeclGroupPtrTy DGP = Actions.ActOnOpenMPDeclareMapperDirectiveEnd(
       DMD, getCurScope(), Actions.getCurLexicalContext(), MapperId,
       MapperType, Range.getBegin(), AS, Clauses);
+
+  if (!IsCorrect)
+    return DeclGroupPtrTy();
   return DGP;
 }
 
