@@ -304,9 +304,9 @@ bool Sema::DiagnoseUseOfDecl(NamedDecl *D, ArrayRef<SourceLocation> Locs,
   }
 
   // [OpenMP 5.0], 2.19.7.3. declare mapper Directive, Restrictions
-  // List-items in map clauses on this construct may only refer to the declared
-  // variable var and entities that could be referenced by a procedure defined
-  // at the same location
+  //  List-items in map clauses on this construct may only refer to the declared
+  //  variable var and entities that could be referenced by a procedure defined
+  //  at the same location
   auto *DMD = dyn_cast<OMPDeclareMapperDecl>(CurContext);
   if (LangOpts.OpenMP && DMD && !CurContext->containsDecl(D) &&
       isa<VarDecl>(D)) {

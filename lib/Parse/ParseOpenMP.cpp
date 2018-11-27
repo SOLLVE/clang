@@ -786,7 +786,7 @@ Parser::ParseOMPDeclareSimdClauses(Parser::DeclGroupPtrTy Ptr,
 ///
 ///       declare-mapper-directive:
 ///         annot_pragma_openmp 'declare' 'mapper' '(' [<mapper-identifer> ':']
-///         <type> <expression> ')' [<clause>[[,] <clause>] ... ]
+///         <type> <var> ')' [<clause>[[,] <clause>] ... ]
 ///         annot_pragma_openmp_end
 ///
 ///       declare-simd-directive:
@@ -1091,6 +1091,11 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
 ///         annot_pragma_openmp 'declare' 'reduction' '(' <reduction_id> ':'
 ///         <type> {',' <type>} ':' <expression> ')' ['initializer' '('
 ///         ('omp_priv' '=' <expression>|<function_call>) ')']
+///         annot_pragma_openmp_end
+///
+///       declare-mapper-directive:
+///         annot_pragma_openmp 'declare' 'mapper' '(' [<mapper-identifer> ':']
+///         <type> <var> ')' [<clause>[[,] <clause>] ... ]
 ///         annot_pragma_openmp_end
 ///
 ///       executable-directive:
