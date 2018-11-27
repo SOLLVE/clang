@@ -481,7 +481,6 @@ void Parser::ParseOpenMPReductionInitializerForDecl(VarDecl *OmpPrivParm) {
 ///         annot_pragma_openmp_end
 /// <mapper-identifier> and <var> are base language identifiers.
 ///
-#include <iostream>
 Parser::DeclGroupPtrTy
 Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   unsigned ScopeFlags = Scope::FnScope | Scope::DeclScope |
@@ -499,17 +498,14 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   auto &DeclNames = Actions.getASTContext().DeclarationNames;
   DeclarationName MapperId;
   if (PP.LookAhead(0).is(tok::colon)) {
-    std::cout << "DBG: " << Tok.getName() << std::endl;
     if (Tok.isNot(tok::identifier) && Tok.isNot(tok::kw_default)) {
-      Diag(Tok.getLocation(), diag::err_omp_expected_mapper_identifier) << 0;
+      Diag(Tok.getLocation(), diag::err_omp_expected_mapper) << 0;
       IsCorrect = false;
-      SkipUntil(tok::colon, tok::r_paren, tok::annot_pragma_openmp_end,
-                Parser::StopBeforeMatch);
     } else
       MapperId = DeclNames.getIdentifier(Tok.getIdentifierInfo());
     ConsumeToken();
     // Consume ':'.
-    IsCorrect = !ExpectAndConsume(tok::colon);
+    ExpectAndConsume(tok::colon);
   } else {
     // If no mapper identifier is provided, its name is "default" by default
     MapperId =
@@ -517,36 +513,22 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   }
 
   // Parse <type> <var>
-  std::cout << "DBG: " << Tok.getName() << std::endl;
   DeclarationName VName;
   SourceRange Range;
   QualType MapperType = parseOpenMPDeclareMapperDecl(&Range, VName, AS);
-  // ParseTypeName(&Range, DeclaratorContext::PrototypeContext, AS);
   if (MapperType.isNull()) {
-    Diag(Tok.getLocation(), diag::err_omp_expected_mapper_identifier) << 0;
+    Diag(Tok.getLocation(), diag::err_omp_expected_mapper) << 1;
     IsCorrect = false;
-    SkipUntil(tok::annot_pragma_openmp_end, Parser::StopBeforeMatch);
-    return DeclGroupPtrTy();
   }
   // Consume ')'.
   T.consumeClose();
 
-  //// Parse <var>
-  //std::cout << "DBG: " << Tok.getName() << std::endl;
-  //if (Tok.isNot(tok::identifier)) {
-  //  Diag(Tok.getLocation(), diag::err_omp_expected_mapper_identifier) << 1;
-  //  IsCorrect = false;
-  //  SkipUntil(tok::colon, tok::r_paren, tok::annot_pragma_openmp_end,
-  //            Parser::StopBeforeMatch);
-  //  return DeclGroupPtrTy();
-  //}
+  if (!IsCorrect) {
+    SkipUntil(tok::annot_pragma_openmp_end, Parser::StopBeforeMatch);
+    return DeclGroupPtrTy();
+  }
 
-  //SourceLocation DeclStart = Tok.getLocation(), DeclEnd;
-  //DeclGroupPtrTy DG = ParseSimpleDeclaration(
-  //    DeclaratorContext::PrototypeContext, DeclEnd, Attrs, false, nullptr);
-  //StmtResult SR = Actions.ActOnDeclStmt(DG, DeclStart, Tok.getLocation());
-
-  // Set up correct scopes
+  // Enter scope.
   OMPDeclareMapperDecl *DMD = Actions.ActOnOpenMPDeclareMapperDirectiveStart(
       getCurScope(), Actions.getCurLexicalContext(), MapperId, MapperType,
       Range.getBegin(), VName, AS);
