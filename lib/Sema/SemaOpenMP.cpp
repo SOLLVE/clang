@@ -13253,80 +13253,71 @@ OMPDeclareMapperDecl *Sema::ActOnOpenMPDeclareMapperDirectiveStart(
     Scope *S, DeclContext *DC, DeclarationName Name, QualType MapperType,
     SourceLocation StartLoc, DeclarationName VN, AccessSpecifier AS,
     Decl *PrevDeclInScope) {
-  //LookupResult Lookup(*this, Name, SourceLocation(), LookupOMPReductionName,
-  //                    forRedeclarationInCurContext());
-  //// [OpenMP 4.0], 2.15 declare reduction Directive, Restrictions
-  //// A reduction-identifier may not be re-declared in the current scope for the
-  //// same type or for a type that is compatible according to the base language
-  //// rules.
-  //llvm::DenseMap<QualType, SourceLocation> PreviousRedeclTypes;
-  //OMPDeclareReductionDecl *PrevDRD = nullptr;
-  //bool InCompoundScope = true;
-  //if (S != nullptr) {
-  //  // Find previous declaration with the same name not referenced in other
-  //  // declarations.
-  //  FunctionScopeInfo *ParentFn = getEnclosingFunction();
-  //  InCompoundScope =
-  //      (ParentFn != nullptr) && !ParentFn->CompoundScopes.empty();
-  //  LookupName(Lookup, S);
-  //  FilterLookupForScope(Lookup, DC, S, /*ConsiderLinkage=*/false,
-  //                       /*AllowInlineNamespace=*/false);
-  //  llvm::DenseMap<OMPDeclareReductionDecl *, bool> UsedAsPrevious;
-  //  LookupResult::Filter Filter = Lookup.makeFilter();
-  //  while (Filter.hasNext()) {
-  //    auto *PrevDecl = cast<OMPDeclareReductionDecl>(Filter.next());
-  //    if (InCompoundScope) {
-  //      auto I = UsedAsPrevious.find(PrevDecl);
-  //      if (I == UsedAsPrevious.end())
-  //        UsedAsPrevious[PrevDecl] = false;
-  //      if (OMPDeclareReductionDecl *D = PrevDecl->getPrevDeclInScope())
-  //        UsedAsPrevious[D] = true;
-  //    }
-  //    PreviousRedeclTypes[PrevDecl->getType().getCanonicalType()] =
-  //        PrevDecl->getLocation();
-  //  }
-  //  Filter.done();
-  //  if (InCompoundScope) {
-  //    for (const auto &PrevData : UsedAsPrevious) {
-  //      if (!PrevData.second) {
-  //        PrevDRD = PrevData.first;
-  //        break;
-  //      }
-  //    }
-  //  }
-  //} else if (PrevDeclInScope != nullptr) {
-  //  auto *PrevDRDInScope = PrevDRD =
-  //      cast<OMPDeclareReductionDecl>(PrevDeclInScope);
-  //  do {
-  //    PreviousRedeclTypes[PrevDRDInScope->getType().getCanonicalType()] =
-  //        PrevDRDInScope->getLocation();
-  //    PrevDRDInScope = PrevDRDInScope->getPrevDeclInScope();
-  //  } while (PrevDRDInScope != nullptr);
-  //}
-  //for (const auto &TyData : ReductionTypes) {
-  //  const auto I = PreviousRedeclTypes.find(TyData.first.getCanonicalType());
-  //  bool Invalid = false;
-  //  if (I != PreviousRedeclTypes.end()) {
-  //    Diag(TyData.second, diag::err_omp_declare_reduction_redefinition)
-  //        << TyData.first;
-  //    Diag(I->second, diag::note_previous_definition);
-  //    Invalid = true;
-  //  }
-  //  PreviousRedeclTypes[TyData.first.getCanonicalType()] = TyData.second;
-  //  auto *DRD = OMPDeclareReductionDecl::Create(Context, DC, TyData.second,
-  //                                              Name, TyData.first, PrevDRD);
-  //  DC->addDecl(DRD);
-  //  DRD->setAccess(AS);
-  //  Decls.push_back(DRD);
-  //  if (Invalid)
-  //    DRD->setInvalidDecl();
-  //  else
-  //    PrevDRD = DRD;
-  //}
+  LookupResult Lookup(*this, Name, SourceLocation(), LookupOMPMapperName,
+                      forRedeclarationInCurContext());
+  // [OpenMP 5.0], 2.19.7.3 declare mapper Directive, Restrictions
+  //  A mapper-identifier may not be redeclared in the current scope for the
+  //  same type or for a type that is compatible according to the base language
+  //  rules.
+  llvm::DenseMap<QualType, SourceLocation> PreviousRedeclTypes;
   OMPDeclareMapperDecl *PrevDMD = nullptr;
-  // FIXME: lld numclause is not correct
+  bool InCompoundScope = true;
+  if (S != nullptr) {
+    // Find previous declaration with the same name not referenced in other
+    // declarations.
+    FunctionScopeInfo *ParentFn = getEnclosingFunction();
+    InCompoundScope =
+        (ParentFn != nullptr) && !ParentFn->CompoundScopes.empty();
+    LookupName(Lookup, S);
+    FilterLookupForScope(Lookup, DC, S, /*ConsiderLinkage=*/false,
+                         /*AllowInlineNamespace=*/false);
+    llvm::DenseMap<OMPDeclareMapperDecl *, bool> UsedAsPrevious;
+    LookupResult::Filter Filter = Lookup.makeFilter();
+    while (Filter.hasNext()) {
+      auto *PrevDecl = cast<OMPDeclareMapperDecl>(Filter.next());
+      if (InCompoundScope) {
+        auto I = UsedAsPrevious.find(PrevDecl);
+        if (I == UsedAsPrevious.end())
+          UsedAsPrevious[PrevDecl] = false;
+        if (OMPDeclareMapperDecl *D = PrevDecl->getPrevDeclInScope())
+          UsedAsPrevious[D] = true;
+      }
+      PreviousRedeclTypes[PrevDecl->getType().getCanonicalType()] =
+          PrevDecl->getLocation();
+    }
+    Filter.done();
+    if (InCompoundScope) {
+      for (const auto &PrevData : UsedAsPrevious) {
+        if (!PrevData.second) {
+          PrevDMD = PrevData.first;
+          break;
+        }
+      }
+    }
+  } else if (PrevDeclInScope) {
+    auto *PrevDMDInScope = PrevDMD =
+        cast<OMPDeclareMapperDecl>(PrevDeclInScope);
+    do {
+      PreviousRedeclTypes[PrevDMDInScope->getType().getCanonicalType()] =
+          PrevDMDInScope->getLocation();
+      PrevDMDInScope = PrevDMDInScope->getPrevDeclInScope();
+    } while (PrevDMDInScope != nullptr);
+  }
+  const auto I = PreviousRedeclTypes.find(MapperType.getCanonicalType());
+  bool Invalid = false;
+  if (I != PreviousRedeclTypes.end()) {
+    Diag(StartLoc, diag::err_omp_declare_mapper_redefinition)
+        << MapperType << Name;
+    Diag(I->second, diag::note_previous_definition);
+    Invalid = true;
+  }
   auto *DMD = OMPDeclareMapperDecl::Create(Context, DC, StartLoc, Name,
                                            MapperType, VN, PrevDMD);
+  DC->addDecl(DMD);
+  DMD->setAccess(AS);
+  if (Invalid)
+    DMD->setInvalidDecl();
+
   // Enter new function scope.
   PushFunctionScope();
   setFunctionHasBranchProtectedScope();
@@ -13339,30 +13330,7 @@ OMPDeclareMapperDecl *Sema::ActOnOpenMPDeclareMapperDirectiveStart(
   PushExpressionEvaluationContext(
       ExpressionEvaluationContext::PotentiallyEvaluated);
 
-  //std::cerr << "Sema: " << VN.getAsString() << std::endl;
-  //VarDecl *VD = buildVarDecl(*this, StartLoc, MapperType, VN.getAsString());
-  //if (S)
-  //  PushOnScopeChains(VD, S);
-  //else
-  //  DMD->addDecl(VD);
-  ////Expr *VDRE = buildDeclRefExpr(*this, VD, MapperType, StartLoc);
-
   return DMD;
-  //auto *DRD = cast<OMPDeclareReductionDecl>(D);
-
-  //// Enter new function scope.
-  //PushFunctionScope();
-  //setFunctionHasBranchProtectedScope();
-
-  //if (S != nullptr)
-  //  PushDeclContext(S, DRD);
-  //else
-  //  CurContext = DRD;
-
-  //PushExpressionEvaluationContext(
-  //    ExpressionEvaluationContext::PotentiallyEvaluated);
-
-  //return;
 }
 
 void Sema::ActOnOpenMPDeclareMapperDirectiveVarDecl(OMPDeclareMapperDecl *DMD,
@@ -13370,30 +13338,17 @@ void Sema::ActOnOpenMPDeclareMapperDirectiveVarDecl(OMPDeclareMapperDecl *DMD,
                                                     QualType MapperType,
                                                     SourceLocation StartLoc,
                                                     DeclarationName VN) {
-  std::cerr << "Sema: " << VN.getAsString() << std::endl;
   VarDecl *VD = buildVarDecl(*this, StartLoc, MapperType, VN.getAsString());
   if (S)
     PushOnScopeChains(VD, S);
   else
     DMD->addDecl(VD);
-  // Expr *VDRE = buildDeclRefExpr(*this, VD, MapperType, StartLoc);
 }
 
 Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareMapperDirectiveEnd(
-    OMPDeclareMapperDecl *D, Scope *S, DeclContext *DC, DeclarationName Name,
-    QualType MapperType, SourceLocation StartLoc, AccessSpecifier AS,
-    ArrayRef<OMPClause *> ClauseList, Decl *PrevDeclInScope) {
-  //OMPDeclareMapperDecl *D = nullptr;
-  //if (!CurContext->isFileContext()) {
-  //  Diag(Loc, diag::err_omp_invalid_scope) << "requires";
-  //} else {
-  //  D = CheckOMPRequiresDecl(Loc, ClauseList);
-  //  if (D) {
-  //    CurContext->addDecl(D);
-  //    DSAStack->addRequiresDecl(D);
-  //  }
-  //}
-  std::cerr << "Sema: mapper end clauses_num: " << ClauseList.size() << std::endl;
+    OMPDeclareMapperDecl *D, Scope *S,
+    ArrayRef<OMPClause *> ClauseList) {
+  std::cerr << "Sema: mapper end with clauses_num: " << ClauseList.size() << std::endl;
   DiscardCleanupsInEvaluationContext();
   PopExpressionEvaluationContext();
 
@@ -13401,15 +13356,13 @@ Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareMapperDirectiveEnd(
   PopFunctionScopeInfo();
 
   if (D) {
-    if (S) {
-      // PushOnScopeChains(DMD, S, /*AddToContext=*/false); // FIXME??
-      // CurContext->addDecl(D);
-      PushOnScopeChains(D, S);
-    } else
+    if (S)
+      PushOnScopeChains(D, S, /*AddToContext=*/false);
+    else
       CurContext->addDecl(D);
+    D->setClauses(ClauseList);
   }
 
-  D->setClauses(ClauseList);
   return DeclGroupPtrTy::make(DeclGroupRef(D));
 }
 

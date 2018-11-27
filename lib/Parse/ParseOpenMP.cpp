@@ -569,9 +569,8 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   Actions.EndOpenMPDSABlock(nullptr);
   OMPDirectiveScope.Exit();
 
-  DeclGroupPtrTy DGP = Actions.ActOnOpenMPDeclareMapperDirectiveEnd(
-      DMD, getCurScope(), Actions.getCurLexicalContext(), MapperId,
-      MapperType, Range.getBegin(), AS, Clauses);
+  DeclGroupPtrTy DGP =
+      Actions.ActOnOpenMPDeclareMapperDirectiveEnd(DMD, getCurScope(), Clauses);
 
   if (!IsCorrect)
     return DeclGroupPtrTy();

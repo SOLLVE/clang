@@ -1254,6 +1254,7 @@ public:
 ///   NamespaceDecl
 ///   TagDecl
 ///   OMPDeclareReductionDecl
+///   OMPDeclareMapperDecl
 ///   FunctionDecl
 ///   ObjCMethodDecl
 ///   ObjCContainerDecl

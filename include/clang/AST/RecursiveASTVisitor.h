@@ -1606,9 +1606,10 @@ DEF_TRAVERSE_DECL(OMPDeclareReductionDecl, {
 })
 
 DEF_TRAVERSE_DECL(OMPDeclareMapperDecl, {
-  for (auto *C : D->clauselists()) {
+  for (auto *C : D->clauselists())
     TRY_TO(TraverseOMPClause(C));
-  }
+  TRY_TO(TraverseType(D->getType()));
+  return true;
 })
 
 DEF_TRAVERSE_DECL(OMPCapturedExprDecl, { TRY_TO(TraverseVarHelper(D)); })
