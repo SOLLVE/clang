@@ -13194,12 +13194,14 @@ Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareReductionDirectiveEnd(
   return DeclReductions;
 }
 
-#include <iostream>
 QualType Sema::ActOnOpenMPDeclareMapperType(Scope *S, Declarator &D) {
   TypeSourceInfo *TInfo = GetTypeForDeclarator(D, S);
   QualType T = TInfo->getType();
-  if (D.isInvalidType())
+  SourceLocation TyLoc = D.getSourceRange().getBegin();
+  if (D.isInvalidType()) {
+    Diag(TyLoc, diag::err_omp_mapper_wrong_type);
     return QualType();
+  }
 
   // Make sure there are no unused decl attributes on the declarator.
   // We don't want to do this for ObjC parameters because we're going
@@ -13223,27 +13225,10 @@ QualType Sema::ActOnOpenMPDeclareMapperType(Scope *S, Declarator &D) {
   QualType MapperType = GetTypeFromParser(ParsedType.get());
   assert(!MapperType.isNull());
 
-  // [OpenMP 4.0], 2.15 declare reduction Directive, Restrictions, C\C++
-  // A type name in a declare reduction directive cannot be a function type, an
-  // array type, a reference type, or a type qualified with const, volatile or
-  // restrict.
-  // FIXME: lld
-  SourceLocation TyLoc = D.getSourceRange().getBegin();
-  if (MapperType.hasQualifiers()) {
-    Diag(TyLoc, diag::err_omp_reduction_wrong_type) << 0;
-    return QualType();
-  }
-
-  if (MapperType->isFunctionType()) {
-    Diag(TyLoc, diag::err_omp_reduction_wrong_type) << 1;
-    return QualType();
-  }
-  if (MapperType->isReferenceType()) {
-    Diag(TyLoc, diag::err_omp_reduction_wrong_type) << 2;
-    return QualType();
-  }
-  if (MapperType->isArrayType()) {
-    Diag(TyLoc, diag::err_omp_reduction_wrong_type) << 3;
+  // [OpenMP 5.0], 2.19.7.3 declare mapper Directive, Restrictions
+  //  The type must be of struct, union or class type in C and C++
+  if (!MapperType->isStructureOrClassType() && !MapperType->isUnionType()) {
+    Diag(TyLoc, diag::err_omp_mapper_wrong_type);
     return QualType();
   }
   return MapperType;
@@ -13348,7 +13333,6 @@ void Sema::ActOnOpenMPDeclareMapperDirectiveVarDecl(OMPDeclareMapperDecl *DMD,
 Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareMapperDirectiveEnd(
     OMPDeclareMapperDecl *D, Scope *S,
     ArrayRef<OMPClause *> ClauseList) {
-  std::cerr << "Sema: mapper end with clauses_num: " << ClauseList.size() << std::endl;
   DiscardCleanupsInEvaluationContext();
   PopExpressionEvaluationContext();
 
