@@ -8777,9 +8777,12 @@ public:
   DeclGroupPtrTy ActOnOpenMPDeclareReductionDirectiveEnd(
       Scope *S, DeclGroupPtrTy DeclReductions, bool IsValid);
 
+  /// Check variable declaration in 'omp declare mapper' construct.
+  TypeResult ActOnOpenMPDeclareMapperVarDecl(Scope *S, Declarator &D);
   /// Check if the specified type is allowed to be used in 'omp declare
   /// mapper' construct.
-  QualType ActOnOpenMPDeclareMapperType(Scope *S, Declarator &D);
+  QualType ActOnOpenMPDeclareMapperType(SourceLocation TyLoc,
+                                        TypeResult ParsedType);
   /// Called on start of '#pragma omp declare mapper'.
   OMPDeclareMapperDecl *ActOnOpenMPDeclareMapperDirectiveStart(
       Scope *S, DeclContext *DC, DeclarationName Name, QualType MapperType,

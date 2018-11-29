@@ -13194,33 +13194,23 @@ Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareReductionDirectiveEnd(
   return DeclReductions;
 }
 
-QualType Sema::ActOnOpenMPDeclareMapperType(Scope *S, Declarator &D) {
+TypeResult Sema::ActOnOpenMPDeclareMapperVarDecl(Scope *S, Declarator &D) {
   TypeSourceInfo *TInfo = GetTypeForDeclarator(D, S);
   QualType T = TInfo->getType();
-  SourceLocation TyLoc = D.getSourceRange().getBegin();
-  if (D.isInvalidType()) {
-    Diag(TyLoc, diag::err_omp_mapper_wrong_type);
-    return QualType();
-  }
-
-  // Make sure there are no unused decl attributes on the declarator.
-  // We don't want to do this for ObjC parameters because we're going
-  // to apply them to the actual parameter declaration.
-  // Likewise, we don't want to do this for alias declarations, because
-  // we are actually going to build a declaration from this eventually.
-  if (D.getContext() != DeclaratorContext::ObjCParameterContext &&
-      D.getContext() != DeclaratorContext::AliasDeclContext &&
-      D.getContext() != DeclaratorContext::AliasTemplateContext)
-    checkUnusedDeclAttributes(D);
+  if (D.isInvalidType())
+    return true;
 
   if (getLangOpts().CPlusPlus) {
     // Check that there are no default arguments (C++ only).
     CheckExtraCXXDefaultArguments(D);
   }
 
-  TypeResult ParsedType = CreateParsedType(T, TInfo);
-  if (!ParsedType.isUsable())
-    return QualType();
+  return CreateParsedType(T, TInfo);
+}
+
+QualType Sema::ActOnOpenMPDeclareMapperType(SourceLocation TyLoc,
+                                            TypeResult ParsedType) {
+  assert(ParsedType.isUsable());
 
   QualType MapperType = GetTypeFromParser(ParsedType.get());
   assert(!MapperType.isNull());
