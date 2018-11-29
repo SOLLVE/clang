@@ -2846,7 +2846,6 @@ Decl *TemplateDeclInstantiator::VisitOMPDeclareReductionDecl(
 
 Decl *
 TemplateDeclInstantiator::VisitOMPDeclareMapperDecl(OMPDeclareMapperDecl *D) {
-  // FIXME: lld
   llvm_unreachable("Declare mapper directive cannot be instantiated within a "
                    "dependent context");
 }

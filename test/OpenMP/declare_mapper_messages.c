@@ -16,10 +16,11 @@ struct vec {                                                            // expec
 #pragma omp declare mapper(#                                            // expected-error {{expected a type}} expected-error {{expected declarator on 'omp declare mapper' directive}}
 #pragma omp declare mapper(struct v                                     // expected-error {{expected declarator on 'omp declare mapper' directive}}
 #pragma omp declare mapper(struct vec                                   // expected-error {{expected declarator on 'omp declare mapper' directive}}
-#pragma omp declare mapper(struct vec v                                 // expected-error {{expected ')'}} expected-note {{to match this '('}}
 #pragma omp declare mapper(S v                                          // expected-error {{unknown type name 'S'}}
+#pragma omp declare mapper(struct vec v                                 // expected-error {{expected ')'}} expected-note {{to match this '('}}
 #pragma omp declare mapper(aa:struct vec v)                             // expected-error {{expected at least one clause on '#pragma omp declare mapper' directive}}
 #pragma omp declare mapper(bb:struct vec v) private(v)                  // expected-error {{expected at least one clause on '#pragma omp declare mapper' directive}} // expected-error {{unexpected OpenMP clause 'private' in directive '#pragma omp declare mapper'}}
+#pragma omp declare mapper(cc:struct vec v) map(v) (                    // expected-warning {{extra tokens at the end of '#pragma omp declare mapper' are ignored}}
 
 #pragma omp declare mapper(++: struct vec v) map(v.len)                 // expected-error {{illegal identifier on 'omp declare mapper' directive}}
 #pragma omp declare mapper(id1: struct vec v) map(v.len, temp)          // expected-error {{only variable v are allowed in map clauses of this 'omp declare mapper' directive}}
