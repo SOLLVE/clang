@@ -310,7 +310,7 @@ bool Sema::DiagnoseUseOfDecl(NamedDecl *D, ArrayRef<SourceLocation> Locs,
   auto *DMD = dyn_cast<OMPDeclareMapperDecl>(CurContext);
   if (LangOpts.OpenMP && DMD && !CurContext->containsDecl(D) &&
       isa<VarDecl>(D)) {
-    Diag(Loc, diag::err_omp_wrong_var_in_declare_mapper)
+    Diag(Loc, diag::err_omp_declare_mapper_wrong_var)
         << DMD->getVarName().getAsString();
     Diag(D->getLocation(), diag::note_entity_declared_at) << D;
     return true;

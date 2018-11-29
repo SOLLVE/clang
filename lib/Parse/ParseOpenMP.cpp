@@ -499,7 +499,7 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   DeclarationName MapperId;
   if (PP.LookAhead(0).is(tok::colon)) {
     if (Tok.isNot(tok::identifier) && Tok.isNot(tok::kw_default)) {
-      Diag(Tok.getLocation(), diag::err_omp_illegal_mapper_identifier);
+      Diag(Tok.getLocation(), diag::err_omp_mapper_illegal_identifier);
       IsCorrect = false;
     } else
       MapperId = DeclNames.getIdentifier(Tok.getIdentifierInfo());
@@ -517,15 +517,21 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
 
   // Parse <type> <var>
   DeclarationName VName;
+  QualType MapperType;
   SourceRange Range;
   TypeResult ParsedType = parseOpenMPDeclareMapperVarDecl(&Range, VName, AS);
-  QualType MapperType =
-      Actions.ActOnOpenMPDeclareMapperType(Range.getBegin(), ParsedType);
+  if (ParsedType.isUsable())
+    MapperType =
+        Actions.ActOnOpenMPDeclareMapperType(Range.getBegin(), ParsedType);
   if (MapperType.isNull())
     IsCorrect = false;
-  // Consume ')'.
-  T.consumeClose();
+  if (!IsCorrect) {
+    SkipUntil(tok::annot_pragma_openmp_end, Parser::StopBeforeMatch);
+    return DeclGroupPtrTy();
+  }
 
+  // Consume ')'.
+  IsCorrect &= !T.consumeClose();
   if (!IsCorrect) {
     SkipUntil(tok::annot_pragma_openmp_end, Parser::StopBeforeMatch);
     return DeclGroupPtrTy();
@@ -594,6 +600,10 @@ TypeResult Parser::parseOpenMPDeclareMapperVarDecl(SourceRange *Range,
   ParseDeclarator(DeclaratorInfo);
   assert(Range);
   *Range = DeclaratorInfo.getSourceRange();
+  if (DeclaratorInfo.getIdentifier() == nullptr) {
+    Diag(Tok.getLocation(), diag::err_omp_mapper_expected_declarator);
+    return true;
+  }
   Name = Actions.GetNameForDeclarator(DeclaratorInfo).getName();
 
   return Actions.ActOnOpenMPDeclareMapperVarDecl(getCurScope(), DeclaratorInfo);
