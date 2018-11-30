@@ -215,12 +215,8 @@ public:
 /// \code
 /// #pragma omp declare mapper(mid: struct vec v) map(v.len, v.data[0:N])
 /// \endcode
-class OMPDeclareMapperDecl final
-    : public ValueDecl,
-      public DeclContext,
-      private llvm::TrailingObjects<OMPDeclareMapperDecl, OMPClause *> {
+class OMPDeclareMapperDecl final : public ValueDecl, public DeclContext {
   friend class ASTDeclReader;
-  friend TrailingObjects;
 
   // Clauses assoicated with this mapper declaration
   OMPClause **Clauses = nullptr;
@@ -250,14 +246,11 @@ class OMPDeclareMapperDecl final
   /// Returns an array of immutable clauses associated with this mapper
   /// declaration
   ArrayRef<const OMPClause *> getClauses() const {
-    //return llvm::makeArrayRef(getTrailingObjects<OMPClause *>(), NumClauses);
     return llvm::makeArrayRef(Clauses, NumClauses);
   }
 
   /// Returns an array of clauses associated with this mapper declaration
   MutableArrayRef<OMPClause *> getClauses() {
-    //return MutableArrayRef<OMPClause *>(getTrailingObjects<OMPClause *>(),
-    //                                    NumClauses);
     return MutableArrayRef<OMPClause *>(Clauses, NumClauses);
   }
 
