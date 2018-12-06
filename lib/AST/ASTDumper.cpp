@@ -1358,12 +1358,12 @@ void ASTDumper::VisitOMPDeclareMapperDecl(const OMPDeclareMapperDecl *D) {
   for (auto *C : D->clauselists()) {
     dumpChild([=] {
       if (!C) {
-        ColorScope Color(*this, NullColor);
+        ColorScope Color(OS, ShowColors, NullColor);
         OS << "<<<NULL>>> OMPClause";
         return;
       }
       {
-        ColorScope Color(*this, AttrColor);
+        ColorScope Color(OS, ShowColors, AttrColor);
         StringRef ClauseName(getOpenMPClauseName(C->getClauseKind()));
         OS << "OMP" << ClauseName.substr(/*Start=*/0, /*N=*/1).upper()
            << ClauseName.drop_front() << "Clause";
