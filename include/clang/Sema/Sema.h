@@ -6067,7 +6067,8 @@ public:
                                     bool ForceCheck = false,
                                     bool ForceUnprivileged = false);
   void CheckLookupAccess(const LookupResult &R);
-  bool IsSimplyAccessible(NamedDecl *decl, DeclContext *Ctx);
+  bool IsSimplyAccessible(NamedDecl *Decl, CXXRecordDecl *NamingClass,
+                          QualType BaseType);
   bool isSpecialMemberAccessibleForDeletion(CXXMethodDecl *decl,
                                             AccessSpecifier access,
                                             QualType objectType);
@@ -8546,9 +8547,9 @@ public:
   void AddParameterABIAttr(SourceRange AttrRange, Decl *D,
                            ParameterABI ABI, unsigned SpellingListIndex);
 
-  void AddNSConsumedAttr(SourceRange AttrRange, Decl *D,
-                         unsigned SpellingListIndex, bool isNSConsumed,
-                         bool isTemplateInstantiation);
+  enum class RetainOwnershipKind {NS, CF, OS};
+  void AddXConsumedAttr(Decl *D, SourceRange SR, unsigned SpellingIndex,
+                        RetainOwnershipKind K, bool IsTemplateInstantiation);
 
   bool checkNSReturnsRetainedReturnType(SourceLocation loc, QualType type);
 
@@ -9654,6 +9655,10 @@ public:
                                        AssignmentAction Action,
                                        CheckedConversionKind CCK);
 
+  ExprResult PerformQualificationConversion(
+      Expr *E, QualType Ty, ExprValueKind VK = VK_RValue,
+      CheckedConversionKind CCK = CCK_ImplicitConversion);
+
   /// the following "Check" methods will return a valid/converted QualType
   /// or a null QualType (indicating an error diagnostic was issued).
 
@@ -10359,7 +10364,7 @@ public:
   void CodeCompleteAssignmentRHS(Scope *S, Expr *LHS);
 
   void CodeCompleteQualifiedId(Scope *S, CXXScopeSpec &SS,
-                               bool EnteringContext);
+                               bool EnteringContext, QualType BaseType);
   void CodeCompleteUsing(Scope *S);
   void CodeCompleteUsingDirective(Scope *S);
   void CodeCompleteNamespaceDecl(Scope *S);

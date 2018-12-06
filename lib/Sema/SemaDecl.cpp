@@ -5575,10 +5575,12 @@ static QualType TryToFixInvalidVariablyModifiedType(QualType T,
   if (VLATy->getElementType()->isVariablyModifiedType())
     return QualType();
 
-  llvm::APSInt Res;
+  Expr::EvalResult Result;
   if (!VLATy->getSizeExpr() ||
-      !VLATy->getSizeExpr()->EvaluateAsInt(Res, Context))
+      !VLATy->getSizeExpr()->EvaluateAsInt(Result, Context))
     return QualType();
+
+  llvm::APSInt Res = Result.Val.getInt();
 
   // Check whether the array size is negative.
   if (Res.isSigned() && Res.isNegative()) {
@@ -7353,19 +7355,23 @@ void Sema::CheckVariableDeclarationType(VarDecl *NewVD) {
         return;
       }
     }
-    // OpenCL v1.2 s6.5 - All program scope variables must be declared in the
+    // OpenCL C v1.2 s6.5 - All program scope variables must be declared in the
     // __constant address space.
-    // OpenCL v2.0 s6.5.1 - Variables defined at program scope and static
+    // OpenCL C v2.0 s6.5.1 - Variables defined at program scope and static
     // variables inside a function can also be declared in the global
     // address space.
+    // OpenCL C++ v1.0 s2.5 inherits rule from OpenCL C v2.0 and allows local
+    // address space additionally.
+    // FIXME: Add local AS for OpenCL C++.
     if (NewVD->isFileVarDecl() || NewVD->isStaticLocal() ||
         NewVD->hasExternalStorage()) {
       if (!T->isSamplerT() &&
           !(T.getAddressSpace() == LangAS::opencl_constant ||
             (T.getAddressSpace() == LangAS::opencl_global &&
-             getLangOpts().OpenCLVersion == 200))) {
+             (getLangOpts().OpenCLVersion == 200 ||
+              getLangOpts().OpenCLCPlusPlus)))) {
         int Scope = NewVD->isStaticLocal() | NewVD->hasExternalStorage() << 1;
-        if (getLangOpts().OpenCLVersion == 200)
+        if (getLangOpts().OpenCLVersion == 200 || getLangOpts().OpenCLCPlusPlus)
           Diag(NewVD->getLocation(), diag::err_opencl_global_invalid_addr_space)
               << Scope << "global or constant";
         else
@@ -9363,20 +9369,6 @@ bool Sema::shouldLinkDependentDeclWithPrevious(Decl *D, Decl *PrevDecl) {
                                         PrevVD->getType());
 }
 
-namespace MultiVersioning {
-enum Type { None, Target, CPUSpecific, CPUDispatch};
-} // MultiVersionType
-
-static MultiVersioning::Type
-getMultiVersionType(const FunctionDecl *FD) {
-  if (FD->hasAttr<TargetAttr>())
-    return MultiVersioning::Target;
-  if (FD->hasAttr<CPUDispatchAttr>())
-    return MultiVersioning::CPUDispatch;
-  if (FD->hasAttr<CPUSpecificAttr>())
-    return MultiVersioning::CPUSpecific;
-  return MultiVersioning::None;
-}
 /// Check the target attribute of the function for MultiVersion
 /// validity.
 ///
@@ -9413,10 +9405,31 @@ static bool CheckMultiVersionValue(Sema &S, const FunctionDecl *FD) {
   return false;
 }
 
+static bool HasNonMultiVersionAttributes(const FunctionDecl *FD,
+                                         MultiVersionKind MVType) {
+  for (const Attr *A : FD->attrs()) {
+    switch (A->getKind()) {
+    case attr::CPUDispatch:
+    case attr::CPUSpecific:
+      if (MVType != MultiVersionKind::CPUDispatch &&
+          MVType != MultiVersionKind::CPUSpecific)
+        return true;
+      break;
+    case attr::Target:
+      if (MVType != MultiVersionKind::Target)
+        return true;
+      break;
+    default:
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool CheckMultiVersionAdditionalRules(Sema &S, const FunctionDecl *OldFD,
                                              const FunctionDecl *NewFD,
                                              bool CausesMV,
-                                             MultiVersioning::Type MVType) {
+                                             MultiVersionKind MVType) {
   enum DoesntSupport {
     FuncTemplates = 0,
     VirtFuncs = 1,
@@ -9437,8 +9450,8 @@ static bool CheckMultiVersionAdditionalRules(Sema &S, const FunctionDecl *OldFD,
   };
 
   bool IsCPUSpecificCPUDispatchMVType =
-      MVType == MultiVersioning::CPUDispatch ||
-      MVType == MultiVersioning::CPUSpecific;
+      MVType == MultiVersionKind::CPUDispatch ||
+      MVType == MultiVersionKind::CPUSpecific;
 
   if (OldFD && !OldFD->getType()->getAs<FunctionProtoType>()) {
     S.Diag(OldFD->getLocation(), diag::err_multiversion_noproto);
@@ -9458,15 +9471,14 @@ static bool CheckMultiVersionAdditionalRules(Sema &S, const FunctionDecl *OldFD,
 
   // For now, disallow all other attributes.  These should be opt-in, but
   // an analysis of all of them is a future FIXME.
-  if (CausesMV && OldFD &&
-      std::distance(OldFD->attr_begin(), OldFD->attr_end()) != 1) {
+  if (CausesMV && OldFD && HasNonMultiVersionAttributes(OldFD, MVType)) {
     S.Diag(OldFD->getLocation(), diag::err_multiversion_no_other_attrs)
         << IsCPUSpecificCPUDispatchMVType;
     S.Diag(NewFD->getLocation(), diag::note_multiversioning_caused_here);
     return true;
   }
 
-  if (std::distance(NewFD->attr_begin(), NewFD->attr_end()) != 1)
+  if (HasNonMultiVersionAttributes(NewFD, MVType))
     return S.Diag(NewFD->getLocation(), diag::err_multiversion_no_other_attrs)
            << IsCPUSpecificCPUDispatchMVType;
 
@@ -9499,8 +9511,8 @@ static bool CheckMultiVersionAdditionalRules(Sema &S, const FunctionDecl *OldFD,
     return S.Diag(NewFD->getLocation(), diag::err_multiversion_doesnt_support)
            << IsCPUSpecificCPUDispatchMVType << DefaultedFuncs;
 
-  if (NewFD->isConstexpr() && (MVType == MultiVersioning::CPUDispatch ||
-                               MVType == MultiVersioning::CPUSpecific))
+  if (NewFD->isConstexpr() && (MVType == MultiVersionKind::CPUDispatch ||
+                               MVType == MultiVersionKind::CPUSpecific))
     return S.Diag(NewFD->getLocation(), diag::err_multiversion_doesnt_support)
            << IsCPUSpecificCPUDispatchMVType << ConstexprFuncs;
 
@@ -9564,19 +9576,19 @@ static bool CheckMultiVersionAdditionalRules(Sema &S, const FunctionDecl *OldFD,
 ///
 /// Returns true if there was an error, false otherwise.
 static bool CheckMultiVersionFirstFunction(Sema &S, FunctionDecl *FD,
-                                           MultiVersioning::Type MVType,
+                                           MultiVersionKind MVType,
                                            const TargetAttr *TA,
                                            const CPUDispatchAttr *CPUDisp,
                                            const CPUSpecificAttr *CPUSpec) {
-  assert(MVType != MultiVersioning::None &&
+  assert(MVType != MultiVersionKind::None &&
          "Function lacks multiversion attribute");
 
   // Target only causes MV if it is default, otherwise this is a normal
   // function.
-  if (MVType == MultiVersioning::Target && !TA->isDefaultVersion())
+  if (MVType == MultiVersionKind::Target && !TA->isDefaultVersion())
     return false;
 
-  if (MVType == MultiVersioning::Target && CheckMultiVersionValue(S, FD)) {
+  if (MVType == MultiVersionKind::Target && CheckMultiVersionValue(S, FD)) {
     FD->setInvalidDecl();
     return true;
   }
@@ -9587,6 +9599,15 @@ static bool CheckMultiVersionFirstFunction(Sema &S, FunctionDecl *FD,
   }
 
   FD->setIsMultiVersion();
+  return false;
+}
+
+static bool PreviousDeclsHaveMultiVersionAttribute(const FunctionDecl *FD) {
+  for (const Decl *D = FD->getPreviousDecl(); D; D = D->getPreviousDecl()) {
+    if (D->getAsFunction()->getMultiVersionKind() != MultiVersionKind::None)
+      return true;
+  }
+
   return false;
 }
 
@@ -9601,7 +9622,8 @@ static bool CheckTargetCausesMultiVersioning(
 
   // If the old decl is NOT MultiVersioned yet, and we don't cause that
   // to change, this is a simple redeclaration.
-  if (!OldTA || OldTA->getFeaturesStr() == NewTA->getFeaturesStr())
+  if (!NewTA->isDefaultVersion() &&
+      (!OldTA || OldTA->getFeaturesStr() == NewTA->getFeaturesStr()))
     return false;
 
   // Otherwise, this decl causes MultiVersioning.
@@ -9613,7 +9635,7 @@ static bool CheckTargetCausesMultiVersioning(
   }
 
   if (CheckMultiVersionAdditionalRules(S, OldFD, NewFD, true,
-                                       MultiVersioning::Target)) {
+                                       MultiVersionKind::Target)) {
     NewFD->setInvalidDecl();
     return true;
   }
@@ -9621,6 +9643,15 @@ static bool CheckTargetCausesMultiVersioning(
   if (CheckMultiVersionValue(S, NewFD)) {
     NewFD->setInvalidDecl();
     return true;
+  }
+
+  // If this is 'default', permit the forward declaration.
+  if (!OldFD->isMultiVersion() && !OldTA && NewTA->isDefaultVersion()) {
+    Redeclaration = true;
+    OldDecl = OldFD;
+    OldFD->setIsMultiVersion();
+    NewFD->setIsMultiVersion();
+    return false;
   }
 
   if (CheckMultiVersionValue(S, OldFD)) {
@@ -9641,7 +9672,10 @@ static bool CheckTargetCausesMultiVersioning(
 
   for (const auto *FD : OldFD->redecls()) {
     const auto *CurTA = FD->getAttr<TargetAttr>();
-    if (!CurTA || CurTA->isInherited()) {
+    // We allow forward declarations before ANY multiversioning attributes, but
+    // nothing after the fact.
+    if (PreviousDeclsHaveMultiVersionAttribute(FD) &&
+        (!CurTA || CurTA->isInherited())) {
       S.Diag(FD->getLocation(), diag::err_multiversion_required_in_redecl)
           << 0;
       S.Diag(NewFD->getLocation(), diag::note_multiversioning_caused_here);
@@ -9663,17 +9697,17 @@ static bool CheckTargetCausesMultiVersioning(
 /// multiversioned declaration collection.
 static bool CheckMultiVersionAdditionalDecl(
     Sema &S, FunctionDecl *OldFD, FunctionDecl *NewFD,
-    MultiVersioning::Type NewMVType, const TargetAttr *NewTA,
+    MultiVersionKind NewMVType, const TargetAttr *NewTA,
     const CPUDispatchAttr *NewCPUDisp, const CPUSpecificAttr *NewCPUSpec,
     bool &Redeclaration, NamedDecl *&OldDecl, bool &MergeTypeWithPrevious,
     LookupResult &Previous) {
 
-  MultiVersioning::Type OldMVType = getMultiVersionType(OldFD);
+  MultiVersionKind OldMVType = OldFD->getMultiVersionKind();
   // Disallow mixing of multiversioning types.
-  if ((OldMVType == MultiVersioning::Target &&
-       NewMVType != MultiVersioning::Target) ||
-      (NewMVType == MultiVersioning::Target &&
-       OldMVType != MultiVersioning::Target)) {
+  if ((OldMVType == MultiVersionKind::Target &&
+       NewMVType != MultiVersionKind::Target) ||
+      (NewMVType == MultiVersionKind::Target &&
+       OldMVType != MultiVersionKind::Target)) {
     S.Diag(NewFD->getLocation(), diag::err_multiversion_types_mixed);
     S.Diag(OldFD->getLocation(), diag::note_previous_declaration);
     NewFD->setInvalidDecl();
@@ -9698,7 +9732,7 @@ static bool CheckMultiVersionAdditionalDecl(
     if (S.IsOverload(NewFD, CurFD, UseMemberUsingDeclRules))
       continue;
 
-    if (NewMVType == MultiVersioning::Target) {
+    if (NewMVType == MultiVersionKind::Target) {
       const auto *CurTA = CurFD->getAttr<TargetAttr>();
       if (CurTA->getFeaturesStr() == NewTA->getFeaturesStr()) {
         NewFD->setIsMultiVersion();
@@ -9721,7 +9755,7 @@ static bool CheckMultiVersionAdditionalDecl(
       // Handle CPUDispatch/CPUSpecific versions.
       // Only 1 CPUDispatch function is allowed, this will make it go through
       // the redeclaration errors.
-      if (NewMVType == MultiVersioning::CPUDispatch &&
+      if (NewMVType == MultiVersionKind::CPUDispatch &&
           CurFD->hasAttr<CPUDispatchAttr>()) {
         if (CurCPUDisp->cpus_size() == NewCPUDisp->cpus_size() &&
             std::equal(
@@ -9742,7 +9776,7 @@ static bool CheckMultiVersionAdditionalDecl(
         NewFD->setInvalidDecl();
         return true;
       }
-      if (NewMVType == MultiVersioning::CPUSpecific && CurCPUSpec) {
+      if (NewMVType == MultiVersionKind::CPUSpecific && CurCPUSpec) {
 
         if (CurCPUSpec->cpus_size() == NewCPUSpec->cpus_size() &&
             std::equal(
@@ -9778,7 +9812,7 @@ static bool CheckMultiVersionAdditionalDecl(
   // Else, this is simply a non-redecl case.  Checking the 'value' is only
   // necessary in the Target case, since The CPUSpecific/Dispatch cases are
   // handled in the attribute adding step.
-  if (NewMVType == MultiVersioning::Target &&
+  if (NewMVType == MultiVersionKind::Target &&
       CheckMultiVersionValue(S, NewFD)) {
     NewFD->setInvalidDecl();
     return true;
@@ -9787,6 +9821,15 @@ static bool CheckMultiVersionAdditionalDecl(
   if (CheckMultiVersionAdditionalRules(S, OldFD, NewFD, false, NewMVType)) {
     NewFD->setInvalidDecl();
     return true;
+  }
+
+  // Permit forward declarations in the case where these two are compatible.
+  if (!OldFD->isMultiVersion()) {
+    OldFD->setIsMultiVersion();
+    NewFD->setIsMultiVersion();
+    Redeclaration = true;
+    OldDecl = OldFD;
+    return false;
   }
 
   NewFD->setIsMultiVersion();
@@ -9820,14 +9863,14 @@ static bool CheckMultiVersionFunction(Sema &S, FunctionDecl *NewFD,
     return true;
   }
 
-  MultiVersioning::Type MVType = getMultiVersionType(NewFD);
+  MultiVersionKind  MVType = NewFD->getMultiVersionKind();
 
   // Main isn't allowed to become a multiversion function, however it IS
   // permitted to have 'main' be marked with the 'target' optimization hint.
   if (NewFD->isMain()) {
-    if ((MVType == MultiVersioning::Target && NewTA->isDefaultVersion()) ||
-        MVType == MultiVersioning::CPUDispatch ||
-        MVType == MultiVersioning::CPUSpecific) {
+    if ((MVType == MultiVersionKind::Target && NewTA->isDefaultVersion()) ||
+        MVType == MultiVersionKind::CPUDispatch ||
+        MVType == MultiVersionKind::CPUSpecific) {
       S.Diag(NewFD->getLocation(), diag::err_multiversion_not_allowed_on_main);
       NewFD->setInvalidDecl();
       return true;
@@ -9840,7 +9883,7 @@ static bool CheckMultiVersionFunction(Sema &S, FunctionDecl *NewFD,
           NewFD->getDeclContext()->getRedeclContext()) {
     // If there's no previous declaration, AND this isn't attempting to cause
     // multiversioning, this isn't an error condition.
-    if (MVType == MultiVersioning::None)
+    if (MVType == MultiVersionKind::None)
       return false;
     return CheckMultiVersionFirstFunction(S, NewFD, MVType, NewTA, NewCPUDisp,
                                           NewCPUSpec);
@@ -9848,29 +9891,21 @@ static bool CheckMultiVersionFunction(Sema &S, FunctionDecl *NewFD,
 
   FunctionDecl *OldFD = OldDecl->getAsFunction();
 
-  if (!OldFD->isMultiVersion() && MVType == MultiVersioning::None)
+  if (!OldFD->isMultiVersion() && MVType == MultiVersionKind::None)
     return false;
 
-  if (OldFD->isMultiVersion() && MVType == MultiVersioning::None) {
+  if (OldFD->isMultiVersion() && MVType == MultiVersionKind::None) {
     S.Diag(NewFD->getLocation(), diag::err_multiversion_required_in_redecl)
-        << (getMultiVersionType(OldFD) != MultiVersioning::Target);
+        << (OldFD->getMultiVersionKind() != MultiVersionKind::Target);
     NewFD->setInvalidDecl();
     return true;
   }
 
   // Handle the target potentially causes multiversioning case.
-  if (!OldFD->isMultiVersion() && MVType == MultiVersioning::Target)
+  if (!OldFD->isMultiVersion() && MVType == MultiVersionKind::Target)
     return CheckTargetCausesMultiVersioning(S, OldFD, NewFD, NewTA,
                                             Redeclaration, OldDecl,
                                             MergeTypeWithPrevious, Previous);
-  // Previous declarations lack CPUDispatch/CPUSpecific.
-  if (!OldFD->isMultiVersion()) {
-    S.Diag(OldFD->getLocation(), diag::err_multiversion_required_in_redecl)
-        << 1;
-    S.Diag(NewFD->getLocation(), diag::note_multiversioning_caused_here);
-    NewFD->setInvalidDecl();
-    return true;
-  }
 
   // At this point, we have a multiversion function decl (in OldFD) AND an
   // appropriate attribute in the current function decl.  Resolve that these are
@@ -15114,22 +15149,6 @@ FieldDecl *Sema::HandleField(Scope *S, RecordDecl *Record,
     }
   }
 
-  // TR 18037 does not allow fields to be declared with address spaces.
-  if (T.getQualifiers().hasAddressSpace() ||
-      T->isDependentAddressSpaceType() ||
-      T->getBaseElementTypeUnsafe()->isDependentAddressSpaceType()) {
-    Diag(Loc, diag::err_field_with_address_space);
-    D.setInvalidType();
-  }
-
-  // OpenCL v1.2 s6.9b,r & OpenCL v2.0 s6.12.5 - The following types cannot be
-  // used as structure or union field: image, sampler, event or block types.
-  if (LangOpts.OpenCL && (T->isEventT() || T->isImageType() ||
-                          T->isSamplerT() || T->isBlockPointerType())) {
-    Diag(Loc, diag::err_opencl_type_struct_or_union_field) << T;
-    D.setInvalidType();
-  }
-
   DiagnoseFunctionSpecifiers(D.getDeclSpec());
 
   if (D.getDeclSpec().isInlineSpecified())
@@ -15241,10 +15260,28 @@ FieldDecl *Sema::CheckFieldDecl(DeclarationName Name, QualType T,
     }
   }
 
-  // OpenCL v1.2 s6.9.c: bitfields are not supported.
-  if (BitWidth && getLangOpts().OpenCL) {
-    Diag(Loc, diag::err_opencl_bitfields);
+  // TR 18037 does not allow fields to be declared with address space
+  if (T.getQualifiers().hasAddressSpace() || T->isDependentAddressSpaceType() ||
+      T->getBaseElementTypeUnsafe()->isDependentAddressSpaceType()) {
+    Diag(Loc, diag::err_field_with_address_space);
+    Record->setInvalidDecl();
     InvalidDecl = true;
+  }
+
+  if (LangOpts.OpenCL) {
+    // OpenCL v1.2 s6.9b,r & OpenCL v2.0 s6.12.5 - The following types cannot be
+    // used as structure or union field: image, sampler, event or block types.
+    if (T->isEventT() || T->isImageType() || T->isSamplerT() ||
+        T->isBlockPointerType()) {
+      Diag(Loc, diag::err_opencl_type_struct_or_union_field) << T;
+      Record->setInvalidDecl();
+      InvalidDecl = true;
+    }
+    // OpenCL v1.2 s6.9.c: bitfields are not supported.
+    if (BitWidth) {
+      Diag(Loc, diag::err_opencl_bitfields);
+      InvalidDecl = true;
+    }
   }
 
   // Anonymous bit-fields cannot be cv-qualified (CWG 2229).

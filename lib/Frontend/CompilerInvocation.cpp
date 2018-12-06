@@ -120,25 +120,25 @@ CompilerInvocationBase::~CompilerInvocationBase() = default;
 
 static unsigned getOptimizationLevel(ArgList &Args, InputKind IK,
                                      DiagnosticsEngine &Diags) {
-  unsigned DefaultOpt = 0;
+  unsigned DefaultOpt = llvm::CodeGenOpt::None;
   if (IK.getLanguage() == InputKind::OpenCL && !Args.hasArg(OPT_cl_opt_disable))
-    DefaultOpt = 2;
+    DefaultOpt = llvm::CodeGenOpt::Default;
 
   if (Arg *A = Args.getLastArg(options::OPT_O_Group)) {
     if (A->getOption().matches(options::OPT_O0))
-      return 0;
+      return llvm::CodeGenOpt::None;
 
     if (A->getOption().matches(options::OPT_Ofast))
-      return 3;
+      return llvm::CodeGenOpt::Aggressive;
 
     assert(A->getOption().matches(options::OPT_O));
 
     StringRef S(A->getValue());
     if (S == "s" || S == "z" || S.empty())
-      return 2;
+      return llvm::CodeGenOpt::Default;
 
     if (S == "g")
-      return 1;
+      return llvm::CodeGenOpt::Less;
 
     return getLastArgIntValue(Args, OPT_O, DefaultOpt, Diags);
   }
@@ -180,6 +180,11 @@ static void addDiagnosticArgs(ArgList &Args, OptSpecifier Group,
     }
   }
 }
+
+// Parse the Static Analyzer configuration. If \p Diags is set to nullptr,
+// it won't verify the input.
+static void parseAnalyzerConfigs(AnalyzerOptions &AnOpts,
+                                 DiagnosticsEngine *Diags);
 
 static void getAllNoBuiltinFuncValues(ArgList &Args,
                                       std::vector<std::string> &Funcs) {
@@ -281,6 +286,12 @@ static bool ParseAnalyzerArgs(AnalyzerOptions &Opts, ArgList &Args,
   Opts.ShowCheckerHelp = Args.hasArg(OPT_analyzer_checker_help);
   Opts.ShowConfigOptionsList = Args.hasArg(OPT_analyzer_config_help);
   Opts.ShowEnabledCheckerList = Args.hasArg(OPT_analyzer_list_enabled_checkers);
+  Opts.ShouldEmitErrorsOnInvalidConfigValue =
+      /* negated */!llvm::StringSwitch<bool>(
+                   Args.getLastArgValue(OPT_analyzer_config_compatibility_mode))
+        .Case("true", true)
+        .Case("false", false)
+        .Default(false);
   Opts.DisableAllChecks = Args.hasArg(OPT_analyzer_disable_all_checks);
 
   Opts.visualizeExplodedGraphWithGraphViz =
@@ -317,7 +328,7 @@ static bool ParseAnalyzerArgs(AnalyzerOptions &Opts, ArgList &Args,
 
   // Go through the analyzer configuration options.
   for (const auto *A : Args.filtered(OPT_analyzer_config)) {
-    A->claim();
+
     // We can have a list of comma separated config names, e.g:
     // '-analyzer-config key1=val1,key2=val2'
     StringRef configList = A->getValue();
@@ -339,9 +350,24 @@ static bool ParseAnalyzerArgs(AnalyzerOptions &Opts, ArgList &Args,
         Success = false;
         break;
       }
+
+      // TODO: Check checker options too, possibly in CheckerRegistry.
+      // Leave unknown non-checker configs unclaimed.
+      if (!key.contains(":") && Opts.isUnknownAnalyzerConfig(key)) {
+        if (Opts.ShouldEmitErrorsOnInvalidConfigValue)
+          Diags.Report(diag::err_analyzer_config_unknown) << key;
+        continue;
+      }
+
+      A->claim();
       Opts.Config[key] = val;
     }
   }
+
+  if (Opts.ShouldEmitErrorsOnInvalidConfigValue)
+    parseAnalyzerConfigs(Opts, &Diags);
+  else
+    parseAnalyzerConfigs(Opts, nullptr);
 
   llvm::raw_string_ostream os(Opts.FullCompilerInvocation);
   for (unsigned i = 0; i < Args.getNumInputArgStrings(); ++i) {
@@ -352,6 +378,91 @@ static bool ParseAnalyzerArgs(AnalyzerOptions &Opts, ArgList &Args,
   os.flush();
 
   return Success;
+}
+
+static StringRef getStringOption(AnalyzerOptions::ConfigTable &Config,
+                                 StringRef OptionName, StringRef DefaultVal) {
+  return Config.insert({OptionName, DefaultVal}).first->second;
+}
+
+static void initOption(AnalyzerOptions::ConfigTable &Config,
+                       DiagnosticsEngine *Diags,
+                       StringRef &OptionField, StringRef Name,
+                       StringRef DefaultVal) {
+  // String options may be known to invalid (e.g. if the expected string is a
+  // file name, but the file does not exist), those will have to be checked in
+  // parseConfigs.
+  OptionField = getStringOption(Config, Name, DefaultVal);
+}
+
+static void initOption(AnalyzerOptions::ConfigTable &Config,
+                       DiagnosticsEngine *Diags,
+                       bool &OptionField, StringRef Name, bool DefaultVal) {
+  auto PossiblyInvalidVal = llvm::StringSwitch<Optional<bool>>(
+                 getStringOption(Config, Name, (DefaultVal ? "true" : "false")))
+      .Case("true", true)
+      .Case("false", false)
+      .Default(None);
+
+  if (!PossiblyInvalidVal) {
+    if (Diags)
+      Diags->Report(diag::err_analyzer_config_invalid_input)
+        << Name << "a boolean";
+    else
+      OptionField = DefaultVal;
+  } else
+    OptionField = PossiblyInvalidVal.getValue();
+}
+
+static void initOption(AnalyzerOptions::ConfigTable &Config,
+                       DiagnosticsEngine *Diags,
+                       unsigned &OptionField, StringRef Name,
+                       unsigned DefaultVal) {
+
+  OptionField = DefaultVal;
+  bool HasFailed = getStringOption(Config, Name, std::to_string(DefaultVal))
+                     .getAsInteger(10, OptionField);
+  if (Diags && HasFailed)
+    Diags->Report(diag::err_analyzer_config_invalid_input)
+      << Name << "an unsigned";
+}
+
+static void parseAnalyzerConfigs(AnalyzerOptions &AnOpts,
+                                 DiagnosticsEngine *Diags) {
+  // TODO: There's no need to store the entire configtable, it'd be plenty
+  // enough tostore checker options.
+
+#define ANALYZER_OPTION(TYPE, NAME, CMDFLAG, DESC, DEFAULT_VAL)                \
+  initOption(AnOpts.Config, Diags, AnOpts.NAME, CMDFLAG, DEFAULT_VAL);
+
+#define ANALYZER_OPTION_DEPENDS_ON_USER_MODE(TYPE, NAME, CMDFLAG, DESC,        \
+                                           SHALLOW_VAL, DEEP_VAL)              \
+  switch (AnOpts.getUserMode()) {                                              \
+  case UMK_Shallow:                                                            \
+    initOption(AnOpts.Config, Diags, AnOpts.NAME, CMDFLAG, SHALLOW_VAL);       \
+    break;                                                                     \
+  case UMK_Deep:                                                               \
+    initOption(AnOpts.Config, Diags, AnOpts.NAME, CMDFLAG, DEEP_VAL);          \
+    break;                                                                     \
+  }                                                                            \
+
+#include "clang/StaticAnalyzer/Core/AnalyzerOptions.def"
+#undef ANALYZER_OPTION
+#undef ANALYZER_OPTION_DEPENDS_ON_USER_MODE
+
+  // At this point, AnalyzerOptions is configured. Let's validate some options.
+
+  if (!Diags)
+    return;
+
+  if (!AnOpts.CTUDir.empty() && !llvm::sys::fs::is_directory(AnOpts.CTUDir))
+    Diags->Report(diag::err_analyzer_config_invalid_input) << "ctu-dir"
+                                                           << "a filename";
+
+  if (!AnOpts.ModelPath.empty() &&
+      !llvm::sys::fs::is_directory(AnOpts.ModelPath))
+    Diags->Report(diag::err_analyzer_config_invalid_input) << "model-path"
+                                                           << "a filename";
 }
 
 static bool ParseMigratorArgs(MigratorOptions &Opts, ArgList &Args) {
@@ -593,12 +704,29 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
   Opts.DwarfVersion = getLastArgIntValue(Args, OPT_dwarf_version_EQ, 0, Diags);
   Opts.DebugColumnInfo = Args.hasArg(OPT_dwarf_column_info);
   Opts.EmitCodeView = Args.hasArg(OPT_gcodeview);
+  Opts.CodeViewGHash = Args.hasArg(OPT_gcodeview_ghash);
   Opts.MacroDebugInfo = Args.hasArg(OPT_debug_info_macro);
   Opts.WholeProgramVTables = Args.hasArg(OPT_fwhole_program_vtables);
   Opts.LTOVisibilityPublicStd = Args.hasArg(OPT_flto_visibility_public_std);
-  Opts.EnableSplitDwarf = Args.hasArg(OPT_enable_split_dwarf);
   Opts.SplitDwarfFile = Args.getLastArgValue(OPT_split_dwarf_file);
   Opts.SplitDwarfInlining = !Args.hasArg(OPT_fno_split_dwarf_inlining);
+
+  if (Arg *A =
+          Args.getLastArg(OPT_enable_split_dwarf, OPT_enable_split_dwarf_EQ)) {
+    if (A->getOption().matches(options::OPT_enable_split_dwarf)) {
+      Opts.setSplitDwarfMode(CodeGenOptions::SplitFileFission);
+    } else {
+      StringRef Name = A->getValue();
+      if (Name == "single")
+        Opts.setSplitDwarfMode(CodeGenOptions::SingleFileFission);
+      else if (Name == "split")
+        Opts.setSplitDwarfMode(CodeGenOptions::SplitFileFission);
+      else
+        Diags.Report(diag::err_drv_invalid_value)
+            << A->getAsString(Args) << Name;
+    }
+  }
+
   Opts.DebugTypeExtRefs = Args.hasArg(OPT_dwarf_ext_refs);
   Opts.DebugExplicitImport = Args.hasArg(OPT_dwarf_explicit_import);
   Opts.DebugFwdTemplateParams = Args.hasArg(OPT_debug_forward_template_params);
@@ -651,6 +779,7 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
           : Args.hasArg(OPT_gpubnames)
                 ? llvm::DICompileUnit::DebugNameTableKind::Default
                 : llvm::DICompileUnit::DebugNameTableKind::None);
+  Opts.DebugRangesBaseAddress = Args.hasArg(OPT_fdebug_ranges_base_address);
 
   setPGOInstrumentor(Opts, Args, Diags);
   Opts.InstrProfileOutput =
@@ -811,6 +940,10 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
     Opts.CoverageExtraChecksum = Args.hasArg(OPT_coverage_cfg_checksum);
     Opts.CoverageNoFunctionNamesInData =
         Args.hasArg(OPT_coverage_no_function_names_in_data);
+    Opts.ProfileFilterFiles =
+        Args.getLastArgValue(OPT_fprofile_filter_files_EQ);
+    Opts.ProfileExcludeFiles =
+        Args.getLastArgValue(OPT_fprofile_exclude_files_EQ);
     Opts.CoverageExitBlockBeforeBody =
         Args.hasArg(OPT_coverage_exit_block_before_body);
     if (Args.hasArg(OPT_coverage_version_EQ)) {
@@ -2458,7 +2591,7 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   Opts.ImplicitModules = !Args.hasArg(OPT_fno_implicit_modules);
   Opts.CharIsSigned = Opts.OpenCL || !Args.hasArg(OPT_fno_signed_char);
   Opts.WChar = Opts.CPlusPlus && !Args.hasArg(OPT_fno_wchar);
-  Opts.Char8 = Args.hasArg(OPT_fchar8__t);
+  Opts.Char8 = Args.hasFlag(OPT_fchar8__t, OPT_fno_char8__t, Opts.CPlusPlus2a);
   if (const Arg *A = Args.getLastArg(OPT_fwchar_type_EQ)) {
     Opts.WCharSize = llvm::StringSwitch<unsigned>(A->getValue())
                          .Case("char", 1)
@@ -3242,6 +3375,12 @@ std::string CompilerInvocation::getModuleHash() const {
     code = ext->hashExtension(code);
   }
 
+  // When compiling with -gmodules, also hash -fdebug-prefix-map as it
+  // affects the debug info in the PCM.
+  if (getCodeGenOpts().DebugTypeExtRefs)
+    for (const auto &KeyValue : getCodeGenOpts().DebugPrefixMap)
+      code = hash_combine(code, KeyValue.first, KeyValue.second);
+
   // Extend the signature with the enabled sanitizers, if at least one is
   // enabled. Sanitizers which cannot affect AST generation aren't hashed.
   SanitizerSet SanHash = LangOpts->Sanitize;
@@ -3279,21 +3418,6 @@ uint64_t getLastArgUInt64Value(const ArgList &Args, OptSpecifier Id,
                                uint64_t Default,
                                DiagnosticsEngine *Diags) {
   return getLastArgIntValueImpl<uint64_t>(Args, Id, Default, Diags);
-}
-
-void BuryPointer(const void *Ptr) {
-  // This function may be called only a small fixed amount of times per each
-  // invocation, otherwise we do actually have a leak which we want to report.
-  // If this function is called more than kGraveYardMaxSize times, the pointers
-  // will not be properly buried and a leak detector will report a leak, which
-  // is what we want in such case.
-  static const size_t kGraveYardMaxSize = 16;
-  LLVM_ATTRIBUTE_UNUSED static const void *GraveYard[kGraveYardMaxSize];
-  static std::atomic<unsigned> GraveYardSize;
-  unsigned Idx = GraveYardSize++;
-  if (Idx >= kGraveYardMaxSize)
-    return;
-  GraveYard[Idx] = Ptr;
 }
 
 IntrusiveRefCntPtr<llvm::vfs::FileSystem>

@@ -131,4 +131,4 @@ void kernel testExtOpenCLTypes() {
   intel_sub_group_avc_mce_payload_t mce_payload;
 }
 
-// CHECK: VarDecl=mce_payload:131:37 (Definition) [type=intel_sub_group_avc_mce_payload_t] [typekind=Typedef] [canonicaltype=intel_sub_group_avc_mce_payload_t] [canonicaltypekind=OCLIntelSubgroupAVCMcePayload] [isPOD=1]
+// CHECK: VarDecl=mce_payload:131:37 (Definition){{( \(invalid\))?}} [type=intel_sub_group_avc_mce_payload_t] [typekind=Typedef] [canonicaltype=intel_sub_group_avc_mce_payload_t] [canonicaltypekind=OCLIntelSubgroupAVCMcePayload] [isPOD=1]
