@@ -483,8 +483,6 @@ void Parser::ParseOpenMPReductionInitializerForDecl(VarDecl *OmpPrivParm) {
 ///
 Parser::DeclGroupPtrTy
 Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
-  unsigned ScopeFlags = Scope::FnScope | Scope::DeclScope |
-                        Scope::CompoundStmtScope | Scope::OpenMPDirectiveScope;
   bool IsCorrect = true;
   // Parse '('
   BalancedDelimiterTracker T(*this, tok::l_paren, tok::annot_pragma_openmp_end);
@@ -544,6 +542,8 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
 
   DeclarationNameInfo DirName;
   SourceLocation Loc = Tok.getLocation();
+  unsigned ScopeFlags = Scope::FnScope | Scope::DeclScope |
+                        Scope::CompoundStmtScope | Scope::OpenMPDirectiveScope;
   ParseScope OMPDirectiveScope(this, ScopeFlags);
   Actions.StartOpenMPDSABlock(OMPD_declare_mapper, DirName, getCurScope(), Loc);
 

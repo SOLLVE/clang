@@ -2861,8 +2861,33 @@ Decl *TemplateDeclInstantiator::VisitOMPDeclareReductionDecl(
 
 Decl *
 TemplateDeclInstantiator::VisitOMPDeclareMapperDecl(OMPDeclareMapperDecl *D) {
-  llvm_unreachable("Declare mapper directive cannot be instantiated within a "
-                   "dependent context");
+  assert(!D->getType()->isDependentType() &&
+         !D->getType()->isInstantiationDependentType() &&
+         !D->getType()->containsUnexpandedParameterPack() &&
+         "Declare mapper directive cannot have a dependent type");
+  // Create an instantiated copy of mapper.
+  QualType T = D->getType();
+  DeclarationName VN = D->getVarName();
+  auto *PrevDeclInScope = D->getPrevDeclInScope();
+  if (PrevDeclInScope && !PrevDeclInScope->isInvalidDecl()) {
+    PrevDeclInScope = cast<OMPDeclareMapperDecl>(
+        SemaRef.CurrentInstantiationScope->findInstantiationOf(PrevDeclInScope)
+            ->get<Decl *>());
+  }
+  OMPDeclareMapperDecl *NewDMD = SemaRef.ActOnOpenMPDeclareMapperDirectiveStart(
+      /*S=*/nullptr, Owner, D->getDeclName(), T, D->getLocation(),
+      VN, D->getAccess(), PrevDeclInScope);
+  SemaRef.CurrentInstantiationScope->InstantiatedLocal(D, NewDMD);
+  SemaRef.ActOnOpenMPDeclareMapperDirectiveVarDecl(NewDMD, /*S=*/nullptr, T,
+                                                   D->getLocation(), VN);
+  // Copy map clauses from the original mapper. There is no need to
+  // instantiate map clauses since they cannot have dependent types.
+  SmallVector<OMPClause *, 6> Clauses;
+  for (OMPClause *C : D->clauselists())
+    Clauses.push_back(C);
+  (void)SemaRef.ActOnOpenMPDeclareMapperDirectiveEnd(NewDMD, /*S=*/nullptr,
+                                                     Clauses);
+  return NewDMD;
 }
 
 Decl *TemplateDeclInstantiator::VisitOMPCapturedExprDecl(

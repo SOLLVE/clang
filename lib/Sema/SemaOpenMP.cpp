@@ -13343,13 +13343,7 @@ OMPDeclareMapperDecl *Sema::ActOnOpenMPDeclareMapperDirectiveStart(
   PushFunctionScope();
   setFunctionHasBranchProtectedScope();
 
-  if (S != nullptr)
-    PushDeclContext(S, DMD);
-  else
-    CurContext = DMD;
-
-  PushExpressionEvaluationContext(
-      ExpressionEvaluationContext::PotentiallyEvaluated);
+  CurContext = DMD;
 
   return DMD;
 }
@@ -13366,20 +13360,15 @@ void Sema::ActOnOpenMPDeclareMapperDirectiveVarDecl(OMPDeclareMapperDecl *DMD,
     DMD->addDecl(VD);
 }
 
-Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareMapperDirectiveEnd(
-    OMPDeclareMapperDecl *D, Scope *S,
-    ArrayRef<OMPClause *> ClauseList) {
-  DiscardCleanupsInEvaluationContext();
-  PopExpressionEvaluationContext();
-
+Sema::DeclGroupPtrTy
+Sema::ActOnOpenMPDeclareMapperDirectiveEnd(OMPDeclareMapperDecl *D, Scope *S,
+                                           ArrayRef<OMPClause *> ClauseList) {
   PopDeclContext();
   PopFunctionScopeInfo();
 
   if (D) {
     if (S)
       PushOnScopeChains(D, S, /*AddToContext=*/false);
-    else
-      CurContext->addDecl(D);
     D->setClauses(ClauseList);
   }
 
