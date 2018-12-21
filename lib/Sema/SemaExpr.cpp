@@ -66,6 +66,12 @@ bool Sema::CanUseDecl(NamedDecl *D, bool TreatUnavailableAsInvalid) {
     if (getLangOpts().CPlusPlus14 && FD->getReturnType()->isUndeducedType() &&
         DeduceReturnType(FD, SourceLocation(), /*Diagnose*/ false))
       return false;
+
+    // See if this is an aligned allocation/deallocation function that is
+    // unavailable.
+    if (TreatUnavailableAsInvalid &&
+        isUnavailableAlignedAllocationFunction(*FD))
+      return false;
   }
 
   // See if this function is unavailable.
@@ -228,6 +234,8 @@ bool Sema::DiagnoseUseOfDecl(NamedDecl *D, ArrayRef<SourceLocation> Locs,
     //   The function 'main' shall not be used within a program.
     if (cast<FunctionDecl>(D)->isMain())
       Diag(Loc, diag::ext_main_used);
+
+    diagnoseUnavailableAlignedAllocation(*cast<FunctionDecl>(D), Loc);
   }
 
   // See if this is an auto-typed variable whose initializer we are parsing.
@@ -4302,7 +4310,57 @@ Sema::ActOnArraySubscriptExpr(Scope *S, Expr *base, SourceLocation lbLoc,
     return CreateOverloadedArraySubscriptExpr(lbLoc, rbLoc, base, idx);
   }
 
-  return CreateBuiltinArraySubscriptExpr(base, lbLoc, idx, rbLoc);
+  ExprResult Res = CreateBuiltinArraySubscriptExpr(base, lbLoc, idx, rbLoc);
+
+  if (!Res.isInvalid() && isa<ArraySubscriptExpr>(Res.get()))
+    CheckSubscriptAccessOfNoDeref(cast<ArraySubscriptExpr>(Res.get()));
+
+  return Res;
+}
+
+void Sema::CheckAddressOfNoDeref(const Expr *E) {
+  ExpressionEvaluationContextRecord &LastRecord = ExprEvalContexts.back();
+  const Expr *StrippedExpr = E->IgnoreParenImpCasts();
+
+  // For expressions like `&(*s).b`, the base is recorded and what should be
+  // checked.
+  const MemberExpr *Member = nullptr;
+  while ((Member = dyn_cast<MemberExpr>(StrippedExpr)) && !Member->isArrow())
+    StrippedExpr = Member->getBase()->IgnoreParenImpCasts();
+
+  LastRecord.PossibleDerefs.erase(StrippedExpr);
+}
+
+void Sema::CheckSubscriptAccessOfNoDeref(const ArraySubscriptExpr *E) {
+  QualType ResultTy = E->getType();
+  ExpressionEvaluationContextRecord &LastRecord = ExprEvalContexts.back();
+
+  // Bail if the element is an array since it is not memory access.
+  if (isa<ArrayType>(ResultTy))
+    return;
+
+  if (ResultTy->hasAttr(attr::NoDeref)) {
+    LastRecord.PossibleDerefs.insert(E);
+    return;
+  }
+
+  // Check if the base type is a pointer to a member access of a struct
+  // marked with noderef.
+  const Expr *Base = E->getBase();
+  QualType BaseTy = Base->getType();
+  if (!(isa<ArrayType>(BaseTy) || isa<PointerType>(BaseTy)))
+    // Not a pointer access
+    return;
+
+  const MemberExpr *Member = nullptr;
+  while ((Member = dyn_cast<MemberExpr>(Base->IgnoreParenCasts())) &&
+         Member->isArrow())
+    Base = Member->getBase();
+
+  if (const auto *Ptr = dyn_cast<PointerType>(Base->getType())) {
+    if (Ptr->getPointeeType()->hasAttr(attr::NoDeref))
+      LastRecord.PossibleDerefs.insert(E);
+  }
 }
 
 ExprResult Sema::ActOnOMPArraySectionExpr(Expr *Base, SourceLocation LBLoc,
@@ -5395,8 +5453,8 @@ ExprResult Sema::ActOnCallExpr(Scope *Scope, Expr *Fn, SourceLocation LParenLoc,
                                ArgExprs.back()->getEndLoc()));
       }
 
-      return new (Context)
-          CallExpr(Context, Fn, None, Context.VoidTy, VK_RValue, RParenLoc);
+      return CallExpr::Create(Context, Fn, /*Args=*/{}, Context.VoidTy,
+                              VK_RValue, RParenLoc);
     }
     if (Fn->getType() == Context.PseudoObjectTy) {
       ExprResult result = CheckPlaceholderExpr(Fn);
@@ -5408,7 +5466,7 @@ ExprResult Sema::ActOnCallExpr(Scope *Scope, Expr *Fn, SourceLocation LParenLoc,
     // in which case we won't do any semantic analysis now.
     if (Fn->isTypeDependent() || Expr::hasAnyTypeDependentArguments(ArgExprs)) {
       if (ExecConfig) {
-        return new (Context) CUDAKernelCallExpr(
+        return CUDAKernelCallExpr::Create(
             Context, Fn, cast<CallExpr>(ExecConfig), ArgExprs,
             Context.DependentTy, VK_RValue, RParenLoc);
       } else {
@@ -5417,8 +5475,8 @@ ExprResult Sema::ActOnCallExpr(Scope *Scope, Expr *Fn, SourceLocation LParenLoc,
             *this, dyn_cast<UnresolvedMemberExpr>(Fn->IgnoreParens()),
             Fn->getBeginLoc());
 
-        return new (Context) CallExpr(
-            Context, Fn, ArgExprs, Context.DependentTy, VK_RValue, RParenLoc);
+        return CallExpr::Create(Context, Fn, ArgExprs, Context.DependentTy,
+                                VK_RValue, RParenLoc);
       }
     }
 
@@ -5446,8 +5504,8 @@ ExprResult Sema::ActOnCallExpr(Scope *Scope, Expr *Fn, SourceLocation LParenLoc,
     // We aren't supposed to apply this logic if there's an '&' involved.
     if (!find.HasFormOfMemberPointer) {
       if (Expr::hasAnyTypeDependentArguments(ArgExprs))
-        return new (Context) CallExpr(
-            Context, Fn, ArgExprs, Context.DependentTy, VK_RValue, RParenLoc);
+        return CallExpr::Create(Context, Fn, ArgExprs, Context.DependentTy,
+                                VK_RValue, RParenLoc);
       OverloadExpr *ovl = find.Expression;
       if (UnresolvedLookupExpr *ULE = dyn_cast<UnresolvedLookupExpr>(ovl))
         return BuildOverloadedCallExpr(
@@ -5549,12 +5607,11 @@ ExprResult Sema::ActOnConvertVectorExpr(Expr *E, ParsedType ParsedDestTy,
 /// block-pointer type.
 ///
 /// \param NDecl the declaration being called, if available
-ExprResult
-Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
-                            SourceLocation LParenLoc,
-                            ArrayRef<Expr *> Args,
-                            SourceLocation RParenLoc,
-                            Expr *Config, bool IsExecConfig) {
+ExprResult Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
+                                       SourceLocation LParenLoc,
+                                       ArrayRef<Expr *> Args,
+                                       SourceLocation RParenLoc, Expr *Config,
+                                       bool IsExecConfig, ADLCallKind UsesADL) {
   FunctionDecl *FDecl = dyn_cast_or_null<FunctionDecl>(NDecl);
   unsigned BuiltinID = (FDecl ? FDecl->getBuiltinID() : 0);
 
@@ -5634,13 +5691,16 @@ Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
   unsigned NumParams = Proto ? Proto->getNumParams() : 0;
 
   CallExpr *TheCall;
-  if (Config)
-    TheCall = new (Context)
-        CUDAKernelCallExpr(Context, Fn, cast<CallExpr>(Config), Args, ResultTy,
-                           VK_RValue, RParenLoc, NumParams);
-  else
-    TheCall = new (Context)
-        CallExpr(Context, Fn, Args, ResultTy, VK_RValue, RParenLoc, NumParams);
+  if (Config) {
+    assert(UsesADL == ADLCallKind::NotADL &&
+           "CUDAKernelCallExpr should not use ADL");
+    TheCall =
+        CUDAKernelCallExpr::Create(Context, Fn, cast<CallExpr>(Config), Args,
+                                   ResultTy, VK_RValue, RParenLoc, NumParams);
+  } else {
+    TheCall = CallExpr::Create(Context, Fn, Args, ResultTy, VK_RValue,
+                               RParenLoc, NumParams, UsesADL);
+  }
 
   if (!getLangOpts().CPlusPlus) {
     // C cannot always handle TypoExpr nodes in builtin calls and direct
@@ -8171,6 +8231,17 @@ Sema::CheckSingleAssignmentConstraints(QualType LHSType, ExprResult &CallerRHS,
   ExprResult LocalRHS = CallerRHS;
   ExprResult &RHS = ConvertRHS ? CallerRHS : LocalRHS;
 
+  if (const auto *LHSPtrType = LHSType->getAs<PointerType>()) {
+    if (const auto *RHSPtrType = RHS.get()->getType()->getAs<PointerType>()) {
+      if (RHSPtrType->getPointeeType()->hasAttr(attr::NoDeref) &&
+          !LHSPtrType->getPointeeType()->hasAttr(attr::NoDeref)) {
+        Diag(RHS.get()->getExprLoc(),
+             diag::warn_noderef_to_dereferenceable_pointer)
+            << RHS.get()->getSourceRange();
+      }
+    }
+  }
+
   if (getLangOpts().CPlusPlus) {
     if (!LHSType->isRecordType() && !LHSType->isAtomicType()) {
       // C++ 5.17p3: If the left operand is not of class type, the
@@ -8291,6 +8362,7 @@ Sema::CheckSingleAssignmentConstraints(QualType LHSType, ExprResult &CallerRHS,
     if (ConvertRHS)
       RHS = ImpCastExprToType(E, Ty, Kind);
   }
+
   return result;
 }
 
@@ -11066,30 +11138,38 @@ static void DiagnoseRecursiveConstFields(Sema &S, const ValueDecl *VD,
                                          const RecordType *Ty,
                                          SourceLocation Loc, SourceRange Range,
                                          OriginalExprKind OEK,
-                                         bool &DiagnosticEmitted,
-                                         bool IsNested = false) {
+                                         bool &DiagnosticEmitted) {
+  std::vector<const RecordType *> RecordTypeList;
+  RecordTypeList.push_back(Ty);
+  unsigned NextToCheckIndex = 0;
   // We walk the record hierarchy breadth-first to ensure that we print
   // diagnostics in field nesting order.
-  // First, check every field for constness.
-  for (const FieldDecl *Field : Ty->getDecl()->fields()) {
-    if (Field->getType().isConstQualified()) {
-      if (!DiagnosticEmitted) {
-        S.Diag(Loc, diag::err_typecheck_assign_const)
-            << Range << NestedConstMember << OEK << VD
-            << IsNested << Field;
-        DiagnosticEmitted = true;
+  while (RecordTypeList.size() > NextToCheckIndex) {
+    bool IsNested = NextToCheckIndex > 0;
+    for (const FieldDecl *Field :
+         RecordTypeList[NextToCheckIndex]->getDecl()->fields()) {
+      // First, check every field for constness.
+      QualType FieldTy = Field->getType();
+      if (FieldTy.isConstQualified()) {
+        if (!DiagnosticEmitted) {
+          S.Diag(Loc, diag::err_typecheck_assign_const)
+              << Range << NestedConstMember << OEK << VD
+              << IsNested << Field;
+          DiagnosticEmitted = true;
+        }
+        S.Diag(Field->getLocation(), diag::note_typecheck_assign_const)
+            << NestedConstMember << IsNested << Field
+            << FieldTy << Field->getSourceRange();
       }
-      S.Diag(Field->getLocation(), diag::note_typecheck_assign_const)
-          << NestedConstMember << IsNested << Field
-          << Field->getType() << Field->getSourceRange();
+
+      // Then we append it to the list to check next in order.
+      FieldTy = FieldTy.getCanonicalType();
+      if (const auto *FieldRecTy = FieldTy->getAs<RecordType>()) {
+        if (llvm::find(RecordTypeList, FieldRecTy) == RecordTypeList.end())
+          RecordTypeList.push_back(FieldRecTy);
+      }
     }
-  }
-  // Then, recurse.
-  for (const FieldDecl *Field : Ty->getDecl()->fields()) {
-    QualType FTy = Field->getType();
-    if (const RecordType *FieldRecTy = FTy->getAs<RecordType>())
-      DiagnoseRecursiveConstFields(S, VD, FieldRecTy, Loc, Range,
-                                   OEK, DiagnosticEmitted, true);
+    ++NextToCheckIndex;
   }
 }
 
@@ -12839,6 +12919,7 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
     break;
   case UO_AddrOf:
     resultType = CheckAddressOfOperand(Input, OpLoc);
+    CheckAddressOfNoDeref(InputExpr);
     RecordModifiableNonNullParam(*this, InputExpr);
     break;
   case UO_Deref: {
@@ -13003,6 +13084,11 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
 
   auto *UO = new (Context)
       UnaryOperator(Input.get(), Opc, resultType, VK, OK, OpLoc, CanOverflow);
+
+  if (Opc == UO_Deref && UO->getType()->hasAttr(attr::NoDeref) &&
+      !isa<ArrayType>(UO->getType().getDesugaredType(Context)))
+    ExprEvalContexts.back().PossibleDerefs.insert(UO);
+
   // Convert the result back to a half vector.
   if (ConvertHalfVec)
     return convertVector(UO, Context.HalfTy, *this);
@@ -13490,7 +13576,7 @@ void Sema::ActOnBlockArguments(SourceLocation CaretLoc, Declarator &ParamInfo,
     // Drop the parameters.
     FunctionProtoType::ExtProtoInfo EPI;
     EPI.HasTrailingReturn = false;
-    EPI.TypeQuals |= DeclSpec::TQ_const;
+    EPI.TypeQuals.addConst();
     T = Context.getFunctionType(Context.DependentTy, None, EPI);
     Sig = Context.getTrivialTypeSourceInfo(T);
   }
@@ -13666,7 +13752,7 @@ ExprResult Sema::ActOnBlockStmtExpr(SourceLocation CaretLoc,
     } else {
       const FunctionProtoType *FPT = cast<FunctionProtoType>(FTy);
       FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
-      EPI.TypeQuals = 0; // FIXME: silently?
+      EPI.TypeQuals = Qualifiers();
       EPI.ExtInfo = Ext;
       BlockTy = Context.getFunctionType(RetTy, FPT->getParamTypes(), EPI);
     }
@@ -14369,6 +14455,51 @@ Sema::PushExpressionEvaluationContext(
   PushExpressionEvaluationContext(NewContext, ClosureContextDecl, ExprContext);
 }
 
+namespace {
+
+const DeclRefExpr *CheckPossibleDeref(Sema &S, const Expr *PossibleDeref) {
+  PossibleDeref = PossibleDeref->IgnoreParenImpCasts();
+  if (const auto *E = dyn_cast<UnaryOperator>(PossibleDeref)) {
+    if (E->getOpcode() == UO_Deref)
+      return CheckPossibleDeref(S, E->getSubExpr());
+  } else if (const auto *E = dyn_cast<ArraySubscriptExpr>(PossibleDeref)) {
+    return CheckPossibleDeref(S, E->getBase());
+  } else if (const auto *E = dyn_cast<MemberExpr>(PossibleDeref)) {
+    return CheckPossibleDeref(S, E->getBase());
+  } else if (const auto E = dyn_cast<DeclRefExpr>(PossibleDeref)) {
+    QualType Inner;
+    QualType Ty = E->getType();
+    if (const auto *Ptr = Ty->getAs<PointerType>())
+      Inner = Ptr->getPointeeType();
+    else if (const auto *Arr = S.Context.getAsArrayType(Ty))
+      Inner = Arr->getElementType();
+    else
+      return nullptr;
+
+    if (Inner->hasAttr(attr::NoDeref))
+      return E;
+  }
+  return nullptr;
+}
+
+} // namespace
+
+void Sema::WarnOnPendingNoDerefs(ExpressionEvaluationContextRecord &Rec) {
+  for (const Expr *E : Rec.PossibleDerefs) {
+    const DeclRefExpr *DeclRef = CheckPossibleDeref(*this, E);
+    if (DeclRef) {
+      const ValueDecl *Decl = DeclRef->getDecl();
+      Diag(E->getExprLoc(), diag::warn_dereference_of_noderef_type)
+          << Decl->getName() << E->getSourceRange();
+      Diag(Decl->getLocation(), diag::note_previous_decl) << Decl->getName();
+    } else {
+      Diag(E->getExprLoc(), diag::warn_dereference_of_noderef_type_no_decl)
+          << E->getSourceRange();
+    }
+  }
+  Rec.PossibleDerefs.clear();
+}
+
 void Sema::PopExpressionEvaluationContext() {
   ExpressionEvaluationContextRecord& Rec = ExprEvalContexts.back();
   unsigned NumTypos = Rec.NumTypos;
@@ -14408,6 +14539,8 @@ void Sema::PopExpressionEvaluationContext() {
     }
   }
 
+  WarnOnPendingNoDerefs(Rec);
+
   // When are coming out of an unevaluated context, clear out any
   // temporaries that we may have created as part of the evaluation of
   // the expression in that context: they aren't relevant because they
@@ -14428,11 +14561,8 @@ void Sema::PopExpressionEvaluationContext() {
   // Pop the current expression evaluation context off the stack.
   ExprEvalContexts.pop_back();
 
-  if (!ExprEvalContexts.empty())
-    ExprEvalContexts.back().NumTypos += NumTypos;
-  else
-    assert(NumTypos == 0 && "There are outstanding typos after popping the "
-                            "last ExpressionEvaluationContextRecord");
+  // The global expression evaluation context record is never popped.
+  ExprEvalContexts.back().NumTypos += NumTypos;
 }
 
 void Sema::DiscardCleanupsInEvaluationContext() {
@@ -14928,9 +15058,8 @@ static bool captureInBlock(BlockScopeInfo *BSI, VarDecl *Var,
         // According to the blocks spec, the capture of a variable from
         // the stack requires a const copy constructor.  This is not true
         // of the copy/move done to move a __block variable to the heap.
-        Expr *DeclRef = new (S.Context) DeclRefExpr(Var, Nested,
-                                                  DeclRefType.withConst(),
-                                                  VK_LValue, Loc);
+        Expr *DeclRef = new (S.Context) DeclRefExpr(
+            S.Context, Var, Nested, DeclRefType.withConst(), VK_LValue, Loc);
 
         ExprResult Result
           = S.PerformCopyInitialization(
@@ -15006,8 +15135,8 @@ static bool captureInCapturedRegion(CapturedRegionScopeInfo *RSI,
     if (S.getLangOpts().OpenMP && RSI->CapRegionKind == CR_OpenMP)
       S.setOpenMPCaptureKind(Field, Var, RSI->OpenMPLevel);
 
-    CopyExpr = new (S.Context) DeclRefExpr(Var, RefersToCapturedVariable,
-                                            DeclRefType, VK_LValue, Loc);
+    CopyExpr = new (S.Context) DeclRefExpr(
+        S.Context, Var, RefersToCapturedVariable, DeclRefType, VK_LValue, Loc);
     Var->setReferenced(true);
     Var->markUsed(S.Context);
   }
@@ -16432,7 +16561,7 @@ ExprResult RebuildUnknownAnyExpr::resolveDecl(Expr *E, ValueDecl *VD) {
       DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(E);
       if (DRE && Proto && Proto->getParamTypes().empty() && Proto->isVariadic()) {
         SourceLocation Loc = FD->getLocation();
-        FunctionDecl *NewFD = FunctionDecl::Create(FD->getASTContext(),
+        FunctionDecl *NewFD = FunctionDecl::Create(S.Context,
                                       FD->getDeclContext(),
                                       Loc, Loc, FD->getNameInfo().getName(),
                                       DestType, FD->getTypeSourceInfo(),
@@ -16660,9 +16789,10 @@ ExprResult Sema::CheckPlaceholderExpr(Expr *E) {
       auto *FD = cast<FunctionDecl>(DRE->getDecl());
       if (FD->getBuiltinID() == Builtin::BI__noop) {
         E = ImpCastExprToType(E, Context.getPointerType(FD->getType()),
-                              CK_BuiltinFnToFnPtr).get();
-        return new (Context) CallExpr(Context, E, None, Context.IntTy,
-                                      VK_RValue, SourceLocation());
+                              CK_BuiltinFnToFnPtr)
+                .get();
+        return CallExpr::Create(Context, E, /*Args=*/{}, Context.IntTy,
+                                VK_RValue, SourceLocation());
       }
     }
 

@@ -737,6 +737,7 @@ void ASTStmtReader::VisitCallExpr(CallExpr *E) {
   E->setCallee(Record.readSubExpr());
   for (unsigned I = 0; I != NumArgs; ++I)
     E->setArg(I, Record.readSubExpr());
+  E->setADLCallKind(static_cast<CallExpr::ADLCallKind>(Record.readInt()));
 }
 
 void ASTStmtReader::VisitCXXMemberCallExpr(CXXMemberCallExpr *E) {
@@ -2480,9 +2481,8 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
 
     case EXPR_CALL:
-      S = new (Context) CallExpr(
-          Context, /* NumArgs=*/Record[ASTStmtReader::NumExprFields],
-          Empty);
+      S = CallExpr::CreateEmpty(
+          Context, /*NumArgs=*/Record[ASTStmtReader::NumExprFields], Empty);
       break;
 
     case EXPR_MEMBER: {
@@ -3072,15 +3072,13 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     }
 
     case EXPR_CXX_OPERATOR_CALL:
-      S = new (Context) CXXOperatorCallExpr(
-          Context, /*NumArgs=*/Record[ASTStmtReader::NumExprFields],
-          Empty);
+      S = CXXOperatorCallExpr::CreateEmpty(
+          Context, /*NumArgs=*/Record[ASTStmtReader::NumExprFields], Empty);
       break;
 
     case EXPR_CXX_MEMBER_CALL:
-      S = new (Context) CXXMemberCallExpr(
-          Context, /*NumArgs=*/Record[ASTStmtReader::NumExprFields],
-          Empty);
+      S = CXXMemberCallExpr::CreateEmpty(
+          Context, /*NumArgs=*/Record[ASTStmtReader::NumExprFields], Empty);
       break;
 
     case EXPR_CXX_CONSTRUCT:
@@ -3120,7 +3118,7 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
 
     case EXPR_USER_DEFINED_LITERAL:
-      S = new (Context) UserDefinedLiteral(
+      S = UserDefinedLiteral::CreateEmpty(
           Context, /*NumArgs=*/Record[ASTStmtReader::NumExprFields], Empty);
       break;
 
@@ -3291,7 +3289,7 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
 
     case EXPR_CUDA_KERNEL_CALL:
-      S = new (Context) CUDAKernelCallExpr(
+      S = CUDAKernelCallExpr::CreateEmpty(
           Context, /*NumArgs=*/Record[ASTStmtReader::NumExprFields], Empty);
       break;
 

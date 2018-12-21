@@ -430,7 +430,19 @@ protected:
     unsigned : NumExprBits;
 
     unsigned NumPreArgs : 1;
+
+    /// True if the callee of the call expression was found using ADL.
+    unsigned UsesADL : 1;
+
+    /// Padding used to align OffsetToTrailingObjects to a byte multiple.
+    unsigned : 24 - 2 - NumExprBits;
+
+    /// The offset in bytes from the this pointer to the start of the
+    /// trailing objects belonging to CallExpr. Intentionally byte sized
+    /// for faster access.
+    unsigned OffsetToTrailingObjects : 8;
   };
+  enum { NumCallExprBits = 32 };
 
   class MemberExprBitfields {
     friend class MemberExpr;
