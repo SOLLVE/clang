@@ -258,6 +258,9 @@ class OMPDeclareMapperDecl final : public ValueDecl, public DeclContext {
     PrevDeclInScope = Prev;
   }
 
+  /// Sets an array of clauses to this mapper declaration
+  void setClauses(ArrayRef<OMPClause *> CL);
+
 public:
   /// Creates declare mapper node.
   static OMPDeclareMapperDecl *Create(ASTContext &C, DeclContext *DC,
@@ -268,8 +271,9 @@ public:
   static OMPDeclareMapperDecl *CreateDeserialized(ASTContext &C, unsigned ID,
                                                   unsigned N);
 
-  /// Sets an array of clauses to this mapper declaration
-  void setClauses(ArrayRef<OMPClause *> CL);
+  /// Creates an array of clauses to this mapper declaration and intializes
+  /// them.
+  void CreateClauses(ASTContext &C, ArrayRef<OMPClause *> CL);
 
   using clauselist_iterator = MutableArrayRef<OMPClause *>::iterator;
   using clauselist_const_iterator = ArrayRef<const OMPClause *>::iterator;

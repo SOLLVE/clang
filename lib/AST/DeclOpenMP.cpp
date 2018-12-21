@@ -147,25 +147,29 @@ OMPDeclareMapperDecl *OMPDeclareMapperDecl::CreateDeserialized(ASTContext &C,
                            DeclarationName(), QualType(), DeclarationName(),
                            /*PrevDeclInScope=*/nullptr);
   D->NumClauses = N;
-  if (D->NumClauses)
-    D->Clauses = new OMPClause *[D->NumClauses];
+  if (N)
+    D->Clauses = (OMPClause **)C.Allocate(sizeof(OMPClause *) * N);
   return D;
 }
 
-void OMPDeclareMapperDecl::setClauses(ArrayRef<OMPClause *> CL) {
-  if (Clauses) {
-    assert(CL.size() == NumClauses &&
-           "Number of clauses is not the same as the preallocated buffer");
-    std::uninitialized_copy(CL.begin(), CL.end(), Clauses);
-  } else {
-    assert(NumClauses == 0 &&
-           "Number of clauses should be 0 on initialization");
-    NumClauses = CL.size();
-    if (NumClauses) {
-      Clauses = new OMPClause *[NumClauses];
-      std::uninitialized_copy(CL.begin(), CL.end(), Clauses);
-    }
+/// Creates an array of clauses to this mapper declaration and intializes
+/// them. The space used to store clause pointers is dynamically allocated,
+/// because we do not know the number of clauses when creating
+/// OMPDeclareMapperDecl
+void OMPDeclareMapperDecl::CreateClauses(ASTContext &C,
+                                         ArrayRef<OMPClause *> CL) {
+  assert(NumClauses == 0 && "Number of clauses should be 0 on initialization");
+  NumClauses = CL.size();
+  if (NumClauses) {
+    Clauses = (OMPClause **)C.Allocate(sizeof(OMPClause *) * NumClauses);
+    setClauses(CL);
   }
+}
+
+void OMPDeclareMapperDecl::setClauses(ArrayRef<OMPClause *> CL) {
+  assert(CL.size() == NumClauses &&
+         "Number of clauses is not the same as the preallocated buffer");
+  std::uninitialized_copy(CL.begin(), CL.end(), Clauses);
 }
 
 //===----------------------------------------------------------------------===//

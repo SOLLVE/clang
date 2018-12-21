@@ -13389,7 +13389,7 @@ Sema::ActOnOpenMPDeclareMapperDirectiveEnd(OMPDeclareMapperDecl *D, Scope *S,
   if (D) {
     if (S)
       PushOnScopeChains(D, S, /*AddToContext=*/false);
-    D->setClauses(ClauseList);
+    D->CreateClauses(Context, ClauseList);
   }
 
   return DeclGroupPtrTy::make(DeclGroupRef(D));

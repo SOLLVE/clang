@@ -1074,7 +1074,7 @@ void ASTDumper::VisitOMPDeclareReductionDecl(const OMPDeclareReductionDecl *D) {
 }
 
 void ASTDumper::VisitOMPDeclareMapperDecl(const OMPDeclareMapperDecl *D) {
-  dumpName(D);
+  NodeDumper.dumpName(D);
   for (auto *C : D->clauselists()) {
     dumpChild([=] {
       if (!C) {
@@ -1088,8 +1088,8 @@ void ASTDumper::VisitOMPDeclareMapperDecl(const OMPDeclareMapperDecl *D) {
         OS << "OMP" << ClauseName.substr(/*Start=*/0, /*N=*/1).upper()
            << ClauseName.drop_front() << "Clause";
       }
-      dumpPointer(C);
-      dumpSourceRange(SourceRange(C->getBeginLoc(), C->getEndLoc()));
+      NodeDumper.dumpPointer(C);
+      NodeDumper.dumpSourceRange(SourceRange(C->getBeginLoc(), C->getEndLoc()));
       if (C->isImplicit())
         OS << " <implicit>";
       for (auto *S : C->children())
