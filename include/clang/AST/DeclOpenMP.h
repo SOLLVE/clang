@@ -238,11 +238,6 @@ class OMPDeclareMapperDecl final : public ValueDecl, public DeclContext {
       : ValueDecl(DK, DC, L, Name, Ty), DeclContext(DK), VarName(VarName),
         PrevDeclInScope(PrevDeclInScope) {}
 
-  ~OMPDeclareMapperDecl() {
-    if (Clauses)
-      delete[] Clauses;
-  }
-
   /// Returns an array of immutable clauses associated with this mapper
   /// declaration
   ArrayRef<const OMPClause *> getClauses() const {
