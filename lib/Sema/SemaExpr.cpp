@@ -4750,8 +4750,9 @@ bool Sema::CheckCXXDefaultArgExpr(SourceLocation CallLoc, FunctionDecl *FD,
     if (Result.isInvalid())
       return true;
 
-    Result = ActOnFinishFullExpr(Result.getAs<Expr>(),
-                                 Param->getOuterLocStart());
+    Result =
+        ActOnFinishFullExpr(Result.getAs<Expr>(), Param->getOuterLocStart(),
+                            /*DiscardedValue*/ false);
     if (Result.isInvalid())
       return true;
 
@@ -9156,16 +9157,6 @@ static void diagnoseStringPlusInt(Sema &Self, SourceLocation OpLoc,
       IndexExpr->getType()->isIntegralOrUnscopedEnumerationType();
   if (!IsStringPlusInt || IndexExpr->isValueDependent())
     return;
-
-  Expr::EvalResult Result;
-  if (IndexExpr->EvaluateAsInt(Result, Self.getASTContext())) {
-    llvm::APSInt index = Result.Val.getInt();
-    unsigned StrLenWithNull = StrExpr->getLength() + 1;
-    if (index.isNonNegative() &&
-        index <= llvm::APSInt(llvm::APInt(index.getBitWidth(), StrLenWithNull),
-                              index.isUnsigned()))
-      return;
-  }
 
   SourceRange DiagRange(LHSExpr->getBeginLoc(), RHSExpr->getEndLoc());
   Self.Diag(OpLoc, diag::warn_string_plus_int)

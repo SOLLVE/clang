@@ -3926,6 +3926,7 @@ class MSPropertyDecl : public DeclaratorDecl {
       : DeclaratorDecl(MSProperty, DC, L, N, T, TInfo, StartL),
         GetterId(Getter), SetterId(Setter) {}
 
+  void anchor() override;
 public:
   friend class ASTDeclReader;
 

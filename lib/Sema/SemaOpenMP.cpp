@@ -22,6 +22,7 @@
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/StmtOpenMP.h"
 #include "clang/AST/StmtVisitor.h"
+#include "clang/AST/TypeOrdering.h"
 #include "clang/Basic/OpenMPKinds.h"
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
@@ -146,6 +147,7 @@ private:
     SourceLocation InnerTeamsRegionLoc;
     /// Reference to the taskgroup task_reduction reference expression.
     Expr *TaskgroupReductionRef = nullptr;
+    llvm::DenseSet<QualType> MappedClassesQualTypes;
     SharingMapTy(OpenMPDirectiveKind DKind, DeclarationNameInfo Name,
                  Scope *CurScope, SourceLocation Loc)
         : Directive(DKind), DirectiveName(Name), CurScope(CurScope),
@@ -660,6 +662,19 @@ public:
     return llvm::make_range(StackElem.DoacrossDepends.end(),
                             StackElem.DoacrossDepends.end());
   }
+
+  // Store types of classes which have been explicitly mapped
+  void addMappedClassesQualTypes(QualType QT) {
+    SharingMapTy &StackElem = Stack.back().first.back();
+    StackElem.MappedClassesQualTypes.insert(QT);
+  }
+
+  // Return set of mapped classes types
+  bool isClassPreviouslyMapped(QualType QT) const {
+    const SharingMapTy &StackElem = Stack.back().first.back();
+    return StackElem.MappedClassesQualTypes.count(QT) != 0;
+  }
+
 };
 bool isParallelOrTaskRegion(OpenMPDirectiveKind DKind) {
   return isOpenMPParallelDirective(DKind) || isOpenMPTaskingDirective(DKind) ||
@@ -1179,10 +1194,13 @@ const DSAStackTy::DSAVarData DSAStackTy::getTopDSA(ValueDecl *D,
         RD->hasMutableFields())) {
     // Variables with const-qualified type having no mutable member may be
     // listed in a firstprivate clause, even if they are static data members.
-    DSAVarData DVarTemp =
-        hasDSA(D, [](OpenMPClauseKind C) { return C == OMPC_firstprivate; },
-               MatchesAlways, FromParent);
-    if (DVarTemp.CKind == OMPC_firstprivate && DVarTemp.RefExpr)
+    DSAVarData DVarTemp = hasInnermostDSA(
+        D,
+        [](OpenMPClauseKind C) {
+          return C == OMPC_firstprivate || C == OMPC_shared;
+        },
+        MatchesAlways, FromParent);
+    if (DVarTemp.CKind != OMPC_unknown && DVarTemp.RefExpr)
       return DVarTemp;
 
     DVar.CKind = OMPC_shared;
@@ -2264,7 +2282,7 @@ public:
       return;
     auto *FD = dyn_cast<FieldDecl>(E->getMemberDecl());
     OpenMPDirectiveKind DKind = Stack->getCurrentDirective();
-    if (isa<CXXThisExpr>(E->getBase()->IgnoreParens())) {
+    if (auto *TE = dyn_cast<CXXThisExpr>(E->getBase()->IgnoreParens())) {
       if (!FD)
         return;
       DSAStackTy::DSAVarData DVar = Stack->getTopDSA(FD, /*FromParent=*/false);
@@ -2291,6 +2309,12 @@ public:
         //
         if (FD->isBitField())
           return;
+
+        // Check to see if the member expression is referencing a class that
+        // has already been explicitly mapped
+        if (Stack->isClassPreviouslyMapped(TE->getType()))
+          return;
+
         ImplicitMap.emplace_back(E);
         return;
       }
@@ -5298,7 +5322,7 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
         LastIteration.get(), UB.get());
     EUB = SemaRef.BuildBinOp(CurScope, InitLoc, BO_Assign, UB.get(),
                              CondOp.get());
-    EUB = SemaRef.ActOnFinishFullExpr(EUB.get());
+    EUB = SemaRef.ActOnFinishFullExpr(EUB.get(), /*DiscardedValue*/ false);
 
     // If we have a combined directive that combines 'distribute', 'for' or
     // 'simd' we need to be able to access the bounds of the schedule of the
@@ -5327,7 +5351,8 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
                                      LastIteration.get(), CombUB.get());
       CombEUB = SemaRef.BuildBinOp(CurScope, InitLoc, BO_Assign, CombUB.get(),
                                    CombCondOp.get());
-      CombEUB = SemaRef.ActOnFinishFullExpr(CombEUB.get());
+      CombEUB =
+          SemaRef.ActOnFinishFullExpr(CombEUB.get(), /*DiscardedValue*/ false);
 
       const CapturedDecl *CD = cast<CapturedStmt>(AStmt)->getCapturedDecl();
       // We expect to have at least 2 more parameters than the 'parallel'
@@ -5361,7 +5386,7 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
             ? LB.get()
             : SemaRef.ActOnIntegerConstant(SourceLocation(), 0).get();
     Init = SemaRef.BuildBinOp(CurScope, InitLoc, BO_Assign, IV.get(), RHS);
-    Init = SemaRef.ActOnFinishFullExpr(Init.get());
+    Init = SemaRef.ActOnFinishFullExpr(Init.get(), /*DiscardedValue*/ false);
 
     if (isOpenMPLoopBoundSharingDirective(DKind)) {
       Expr *CombRHS =
@@ -5372,7 +5397,8 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
               : SemaRef.ActOnIntegerConstant(SourceLocation(), 0).get();
       CombInit =
           SemaRef.BuildBinOp(CurScope, InitLoc, BO_Assign, IV.get(), CombRHS);
-      CombInit = SemaRef.ActOnFinishFullExpr(CombInit.get());
+      CombInit =
+          SemaRef.ActOnFinishFullExpr(CombInit.get(), /*DiscardedValue*/ false);
     }
   }
 
@@ -5404,7 +5430,7 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
   if (!Inc.isUsable())
     return 0;
   Inc = SemaRef.BuildBinOp(CurScope, IncLoc, BO_Assign, IV.get(), Inc.get());
-  Inc = SemaRef.ActOnFinishFullExpr(Inc.get());
+  Inc = SemaRef.ActOnFinishFullExpr(Inc.get(), /*DiscardedValue*/ false);
   if (!Inc.isUsable())
     return 0;
 
@@ -5422,7 +5448,8 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
     // LB = LB + ST
     NextLB =
         SemaRef.BuildBinOp(CurScope, IncLoc, BO_Assign, LB.get(), NextLB.get());
-    NextLB = SemaRef.ActOnFinishFullExpr(NextLB.get());
+    NextLB =
+        SemaRef.ActOnFinishFullExpr(NextLB.get(), /*DiscardedValue*/ false);
     if (!NextLB.isUsable())
       return 0;
     // UB + ST
@@ -5432,7 +5459,8 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
     // UB = UB + ST
     NextUB =
         SemaRef.BuildBinOp(CurScope, IncLoc, BO_Assign, UB.get(), NextUB.get());
-    NextUB = SemaRef.ActOnFinishFullExpr(NextUB.get());
+    NextUB =
+        SemaRef.ActOnFinishFullExpr(NextUB.get(), /*DiscardedValue*/ false);
     if (!NextUB.isUsable())
       return 0;
     if (isOpenMPLoopBoundSharingDirective(DKind)) {
@@ -5443,7 +5471,8 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
       // LB = LB + ST
       CombNextLB = SemaRef.BuildBinOp(CurScope, IncLoc, BO_Assign, CombLB.get(),
                                       CombNextLB.get());
-      CombNextLB = SemaRef.ActOnFinishFullExpr(CombNextLB.get());
+      CombNextLB = SemaRef.ActOnFinishFullExpr(CombNextLB.get(),
+                                               /*DiscardedValue*/ false);
       if (!CombNextLB.isUsable())
         return 0;
       // UB + ST
@@ -5454,7 +5483,8 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
       // UB = UB + ST
       CombNextUB = SemaRef.BuildBinOp(CurScope, IncLoc, BO_Assign, CombUB.get(),
                                       CombNextUB.get());
-      CombNextUB = SemaRef.ActOnFinishFullExpr(CombNextUB.get());
+      CombNextUB = SemaRef.ActOnFinishFullExpr(CombNextUB.get(),
+                                               /*DiscardedValue*/ false);
       if (!CombNextUB.isUsable())
         return 0;
     }
@@ -5475,7 +5505,8 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
     assert(DistInc.isUsable() && "distribute inc expr was not built");
     DistInc = SemaRef.BuildBinOp(CurScope, DistIncLoc, BO_Assign, IV.get(),
                                  DistInc.get());
-    DistInc = SemaRef.ActOnFinishFullExpr(DistInc.get());
+    DistInc =
+        SemaRef.ActOnFinishFullExpr(DistInc.get(), /*DiscardedValue*/ false);
     assert(DistInc.isUsable() && "distribute inc expr was not built");
 
     // Build expression: UB = min(UB, prevUB) for #for in composite or combined
@@ -5487,7 +5518,8 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
         DistEUBLoc, DistEUBLoc, IsUBGreater.get(), PrevUB.get(), UB.get());
     PrevEUB = SemaRef.BuildBinOp(CurScope, DistIncLoc, BO_Assign, UB.get(),
                                  CondOp.get());
-    PrevEUB = SemaRef.ActOnFinishFullExpr(PrevEUB.get());
+    PrevEUB =
+        SemaRef.ActOnFinishFullExpr(PrevEUB.get(), /*DiscardedValue*/ false);
 
     // Build IV <= PrevUB to be used in parallel for is in combination with
     // a distribute directive with schedule(static, 1)
@@ -5591,8 +5623,10 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
   Built.IterationVarRef = IV.get();
   Built.LastIteration = LastIteration.get();
   Built.NumIterations = NumIterations.get();
-  Built.CalcLastIteration =
-      SemaRef.ActOnFinishFullExpr(CalcLastIteration.get()).get();
+  Built.CalcLastIteration = SemaRef
+                                .ActOnFinishFullExpr(CalcLastIteration.get(),
+                                                     /*DiscardedValue*/ false)
+                                .get();
   Built.PreCond = PreCond.get();
   Built.PreInits = buildPreInits(C, Captures);
   Built.Cond = Cond.get();
@@ -10252,8 +10286,8 @@ OMPClause *Sema::ActOnOpenMPLastprivateClause(ArrayRef<Expr *> VarList,
                                          PseudoDstExpr, PseudoSrcExpr);
     if (AssignmentOp.isInvalid())
       continue;
-    AssignmentOp = ActOnFinishFullExpr(AssignmentOp.get(), ELoc,
-                                       /*DiscardedValue=*/true);
+    AssignmentOp =
+        ActOnFinishFullExpr(AssignmentOp.get(), ELoc, /*DiscardedValue*/ false);
     if (AssignmentOp.isInvalid())
       continue;
 
@@ -11259,7 +11293,8 @@ static bool actOnOMPReductionKindClause(
                            BO_Assign, LHSDRE, ConditionalOp);
         }
         if (ReductionOp.isUsable())
-          ReductionOp = S.ActOnFinishFullExpr(ReductionOp.get());
+          ReductionOp = S.ActOnFinishFullExpr(ReductionOp.get(),
+                                              /*DiscardedValue*/ false);
       }
       if (!ReductionOp.isUsable())
         continue;
@@ -11597,7 +11632,7 @@ OMPClause *Sema::ActOnOpenMPLinearClause(
         buildDeclRefExpr(*this, SaveVar, StepExpr->getType(), StepLoc);
     ExprResult CalcStep =
         BuildBinOp(CurScope, StepLoc, BO_Assign, SaveRef.get(), StepExpr);
-    CalcStep = ActOnFinishFullExpr(CalcStep.get());
+    CalcStep = ActOnFinishFullExpr(CalcStep.get(), /*DiscardedValue*/ false);
 
     // Warn about zero linear step (it would be probably better specified as
     // making corresponding variables 'const').
@@ -11685,7 +11720,7 @@ static bool FinishOpenMPLinearClause(OMPLinearClause &Clause, DeclRefExpr *IV,
     else
       Update = *CurPrivate;
     Update = SemaRef.ActOnFinishFullExpr(Update.get(), DE->getBeginLoc(),
-                                         /*DiscardedValue=*/true);
+                                         /*DiscardedValue*/ false);
 
     // Build final: Var = InitExpr + NumIterations * Step
     ExprResult Final;
@@ -11696,7 +11731,7 @@ static bool FinishOpenMPLinearClause(OMPLinearClause &Clause, DeclRefExpr *IV,
     else
       Final = *CurPrivate;
     Final = SemaRef.ActOnFinishFullExpr(Final.get(), DE->getBeginLoc(),
-                                        /*DiscardedValue=*/true);
+                                        /*DiscardedValue*/ false);
 
     if (!Update.isUsable() || !Final.isUsable()) {
       Updates.push_back(nullptr);
@@ -11864,7 +11899,7 @@ OMPClause *Sema::ActOnOpenMPCopyinClause(ArrayRef<Expr *> VarList,
     if (AssignmentOp.isInvalid())
       continue;
     AssignmentOp = ActOnFinishFullExpr(AssignmentOp.get(), DE->getExprLoc(),
-                                       /*DiscardedValue=*/true);
+                                       /*DiscardedValue*/ false);
     if (AssignmentOp.isInvalid())
       continue;
 
@@ -11972,8 +12007,8 @@ OMPClause *Sema::ActOnOpenMPCopyprivateClause(ArrayRef<Expr *> VarList,
         DSAStack->getCurScope(), ELoc, BO_Assign, PseudoDstExpr, PseudoSrcExpr);
     if (AssignmentOp.isInvalid())
       continue;
-    AssignmentOp = ActOnFinishFullExpr(AssignmentOp.get(), ELoc,
-                                       /*DiscardedValue=*/true);
+    AssignmentOp =
+        ActOnFinishFullExpr(AssignmentOp.get(), ELoc, /*DiscardedValue*/ false);
     if (AssignmentOp.isInvalid())
       continue;
 
@@ -12454,6 +12489,19 @@ static const Expr *checkMapClauseExpressionBase(
                                                       E->getType()))
         AllowWholeSizeArraySection = false;
 
+      if (const auto *TE = dyn_cast<CXXThisExpr>(E)) {
+        Expr::EvalResult Result;
+        if (CurE->getIdx()->EvaluateAsInt(Result, SemaRef.getASTContext())) {
+          if (!Result.Val.getInt().isNullValue()) {
+            SemaRef.Diag(CurE->getIdx()->getExprLoc(),
+                         diag::err_omp_invalid_map_this_expr);
+            SemaRef.Diag(CurE->getIdx()->getExprLoc(),
+                         diag::note_omp_invalid_subscript_on_this_ptr_map);
+          }
+        }
+        RelevantExpr = TE;
+      }
+
       // Record the component - we don't have any declaration associated.
       CurComponents.emplace_back(CurE, nullptr);
     } else if (auto *CurE = dyn_cast<OMPArraySectionExpr>(E)) {
@@ -12498,6 +12546,30 @@ static const Expr *checkMapClauseExpressionBase(
             ELoc, diag::err_array_section_does_not_specify_contiguous_storage)
             << CurE->getSourceRange();
         return nullptr;
+      }
+
+      if (const auto *TE = dyn_cast<CXXThisExpr>(E)) {
+        Expr::EvalResult ResultR;
+        Expr::EvalResult ResultL;
+        if (CurE->getLength()->EvaluateAsInt(ResultR,
+                                             SemaRef.getASTContext())) {
+          if (!ResultR.Val.getInt().isOneValue()) {
+            SemaRef.Diag(CurE->getLength()->getExprLoc(),
+                         diag::err_omp_invalid_map_this_expr);
+            SemaRef.Diag(CurE->getLength()->getExprLoc(),
+                         diag::note_omp_invalid_length_on_this_ptr_mapping);
+          }
+        }
+        if (CurE->getLowerBound() && CurE->getLowerBound()->EvaluateAsInt(
+                                        ResultL, SemaRef.getASTContext())) {
+          if (!ResultL.Val.getInt().isNullValue()) {
+            SemaRef.Diag(CurE->getLowerBound()->getExprLoc(),
+                         diag::err_omp_invalid_map_this_expr);
+            SemaRef.Diag(CurE->getLowerBound()->getExprLoc(),
+                         diag::note_omp_invalid_lower_bound_on_this_ptr_mapping);
+          }
+        }
+        RelevantExpr = TE;
       }
 
       // Record the component - we don't have any declaration associated.
@@ -12836,6 +12908,18 @@ checkMappableExpressionList(Sema &SemaRef, DSAStackTy *DSAS,
 
     assert(!CurComponents.empty() &&
            "Invalid mappable expression information.");
+
+    if (const auto *TE = dyn_cast<CXXThisExpr>(BE)) {
+      // Add store "this" pointer to class in DSAStackTy for future checking
+      DSAS->addMappedClassesQualTypes(TE->getType());
+      // Skip restriction checking for variable or field declarations
+      MVLI.ProcessedVarList.push_back(RE);
+      MVLI.VarComponents.resize(MVLI.VarComponents.size() + 1);
+      MVLI.VarComponents.back().append(CurComponents.begin(),
+                                       CurComponents.end());
+      MVLI.VarBaseDeclarations.push_back(nullptr);
+      continue;
+    }
 
     // For the following checks, we rely on the base declaration which is
     // expected to be associated with the last component. The declaration is
