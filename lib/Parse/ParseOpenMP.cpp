@@ -1959,7 +1959,7 @@ static OpenMPMapModifierKind isMapModifier(Parser &P) {
 
 /// Parse map-type-modifiers in map clause.
 /// map([ [map-type-modifier[,] [map-type-modifier[,] ...] map-type : ] list)
-/// where, map-type-modifier ::= always | close 
+/// where, map-type-modifier ::= always | close | mapper(mapper-identifier)
 static void parseMapTypeModifiers(Parser &P,
                                   Parser::OpenMPVarListDataTy &Data) {
   Preprocessor &PP = P.getPreprocessor();
@@ -1971,6 +1971,26 @@ static void parseMapTypeModifiers(Parser &P,
       Data.MapTypeModifiers.push_back(TypeModifier);
       Data.MapTypeModifiersLoc.push_back(Tok.getLocation());
       P.ConsumeToken();
+    } else if (TypeModifier == OMPC_MAP_MODIFIER_mapper) {
+      Data.MapTypeModifiers.push_back(TypeModifier);
+      Data.MapTypeModifiersLoc.push_back(Tok.getLocation());
+      P.ConsumeToken();
+      // Parse '('.
+      BalancedDelimiterTracker T(P, tok::l_paren, tok::annot_pragma_openmp_end);
+      if (T.expectAndConsume(diag::err_expected_lparen_after,
+                             getOpenMPClauseName(OMPC_map))) {
+        P.SkipUntil(tok::comma, tok::r_paren, tok::annot_pragma_openmp_end,
+                  Parser::StopBeforeMatch);
+        return;
+      }
+      // Parse mapper-identifier
+      auto &DeclNames = P.getActions().getASTContext().DeclarationNames;
+      Data.MapperIdentifier =
+          DeclNames.getIdentifier(P.getCurToken().getIdentifierInfo());
+      P.ConsumeToken();
+      // Parse ')'.
+      if (T.consumeClose())
+        return;
     } else {
       // For the case of unknown map-type-modifier or a map-type.
       // Map-type is followed by a colon; the function returns when it
@@ -2216,6 +2236,7 @@ bool Parser::ParseOpenMPVarList(OpenMPDirectiveKind DKind,
 ///       'depend' '(' in | out | inout : list | source ')'
 ///    map-clause:
 ///       'map' '(' [ [ always [,] ] [ close [,] ]
+///          [ mapper(mapper-identifier) [,] ]
 ///          to | from | tofrom | alloc | release | delete ':' ] list ')';
 ///    to-clause:
 ///       'to' '(' list ')'
@@ -2246,7 +2267,7 @@ OMPClause *Parser::ParseOpenMPVarListClause(OpenMPDirectiveKind DKind,
   return Actions.ActOnOpenMPVarListClause(
       Kind, Vars, Data.TailExpr, Loc, LOpen, Data.ColonLoc, Data.RLoc,
       Data.ReductionIdScopeSpec, Data.ReductionId, Data.DepKind, Data.LinKind,
-      Data.MapTypeModifiers, Data.MapTypeModifiersLoc, Data.MapType,
-      Data.IsMapTypeImplicit, Data.DepLinMapLoc);
+      Data.MapTypeModifiers, Data.MapTypeModifiersLoc, Data.MapperIdentifier,
+      Data.MapType, Data.IsMapTypeImplicit, Data.DepLinMapLoc);
 }
 

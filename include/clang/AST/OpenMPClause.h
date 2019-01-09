@@ -42,6 +42,7 @@
 namespace clang {
 
 class ASTContext;
+class OMPDeclareMapperDecl;
 
 //===----------------------------------------------------------------------===//
 // AST classes for clauses.
@@ -4069,11 +4070,17 @@ public:
 private:
   /// Map-type-modifiers for the 'map' clause.
   OpenMPMapModifierKind MapTypeModifiers[NumberOfModifiers] = {
-    OMPC_MAP_MODIFIER_unknown, OMPC_MAP_MODIFIER_unknown
-  };
-  
+      OMPC_MAP_MODIFIER_unknown, OMPC_MAP_MODIFIER_unknown,
+      OMPC_MAP_MODIFIER_unknown};
+
   /// Location of map-type-modifiers for the 'map' clause.
   SourceLocation MapTypeModifiersLoc[NumberOfModifiers];
+
+  /// User-defined mapper identifier, if any
+  DeclarationName MapperIdentifier;
+
+  /// Corresponding user-defined mapper, if any
+  OMPDeclareMapperDecl *Mapper = nullptr;
 
   /// Map type for the 'map' clause.
   OpenMPMapClauseKind MapType = OMPC_MAP_unknown;
@@ -4244,11 +4251,19 @@ public:
   ArrayRef<OpenMPMapModifierKind> getMapTypeModifiers() const LLVM_READONLY {
     return llvm::makeArrayRef(MapTypeModifiers);
   }
-  
+
   /// Fetches ArrayRef of location of map-type-modifiers.
   ArrayRef<SourceLocation> getMapTypeModifiersLoc() const LLVM_READONLY {
     return llvm::makeArrayRef(MapTypeModifiersLoc);
   }
+
+  /// Fetches the name of user-defined mapper identifier.
+  DeclarationName getMapperIdentifier() const LLVM_READONLY {
+    return MapperIdentifier;
+  }
+
+  /// Fetches the associated user-defined mapper.
+  OMPDeclareMapperDecl *getMapper() const LLVM_READONLY { return Mapper; }
 
   /// Fetches location of clause mapping kind.
   SourceLocation getMapLoc() const LLVM_READONLY { return MapLoc; }

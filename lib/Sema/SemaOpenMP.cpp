@@ -3357,7 +3357,7 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
     }
     if (!ImplicitMaps.empty()) {
       if (OMPClause *Implicit = ActOnOpenMPMapClause(
-              llvm::None, llvm::None, OMPC_MAP_tofrom,
+              llvm::None, llvm::None, DeclarationName(), OMPC_MAP_tofrom,
               /*IsMapTypeImplicit=*/true, SourceLocation(), SourceLocation(),
               ImplicitMaps, SourceLocation(), SourceLocation(),
               SourceLocation())) {
@@ -9579,8 +9579,8 @@ OMPClause *Sema::ActOnOpenMPVarListClause(
     OpenMPLinearClauseKind LinKind,
     ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
     ArrayRef<SourceLocation> MapTypeModifiersLoc,
-    OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
-    SourceLocation DepLinMapLoc) {
+    DeclarationName MapperIdentifier, OpenMPMapClauseKind MapType,
+    bool IsMapTypeImplicit, SourceLocation DepLinMapLoc) {
   OMPClause *Res = nullptr;
   switch (Kind) {
   case OMPC_private:
@@ -9631,9 +9631,10 @@ OMPClause *Sema::ActOnOpenMPVarListClause(
                                   StartLoc, LParenLoc, EndLoc);
     break;
   case OMPC_map:
-    Res = ActOnOpenMPMapClause(MapTypeModifiers, MapTypeModifiersLoc, MapType,
-                               IsMapTypeImplicit, DepLinMapLoc, ColonLoc,
-                               VarList, StartLoc, LParenLoc, EndLoc);
+    Res = ActOnOpenMPMapClause(MapTypeModifiers, MapTypeModifiersLoc,
+                               MapperIdentifier, MapType, IsMapTypeImplicit,
+                               DepLinMapLoc, ColonLoc, VarList, StartLoc,
+                               LParenLoc, EndLoc);
     break;
   case OMPC_to:
     Res = ActOnOpenMPToClause(VarList, StartLoc, LParenLoc, EndLoc);
@@ -13049,9 +13050,16 @@ checkMappableExpressionList(Sema &SemaRef, DSAStackTy *DSAS,
   }
 }
 
+// Look up the user defined mapper given the mapper name and mapped type.
+OMPDeclareMapperDecl *lookupUserDefinedMapper(DeclarationName MapperIdentifier)
+{
+  return nullptr;
+}
+
 OMPClause *
 Sema::ActOnOpenMPMapClause(ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
                            ArrayRef<SourceLocation> MapTypeModifiersLoc,
+                           DeclarationName MapperIdentifier,
                            OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
                            SourceLocation MapLoc, SourceLocation ColonLoc,
                            ArrayRef<Expr *> VarList, SourceLocation StartLoc,
@@ -13060,8 +13068,9 @@ Sema::ActOnOpenMPMapClause(ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
   checkMappableExpressionList(*this, DSAStack, OMPC_map, MVLI, StartLoc,
                               MapType, IsMapTypeImplicit);
 
-  OpenMPMapModifierKind Modifiers[] = { OMPC_MAP_MODIFIER_unknown,
-                                        OMPC_MAP_MODIFIER_unknown };
+  OpenMPMapModifierKind Modifiers[] = {OMPC_MAP_MODIFIER_unknown,
+                                       OMPC_MAP_MODIFIER_unknown,
+                                       OMPC_MAP_MODIFIER_unknown};
   SourceLocation ModifiersLoc[OMPMapClause::NumberOfModifiers];
 
   // Process map-type-modifiers, flag errors for duplicate modifiers.
@@ -13073,11 +13082,23 @@ Sema::ActOnOpenMPMapClause(ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
       continue;
     }
     assert(Count < OMPMapClause::NumberOfModifiers &&
-           "Modifiers exceed the allowed number of map type modifiers"); 
+           "Modifiers exceed the allowed number of map type modifiers");
+    assert(
+        (MapTypeModifiers[I] != OMPC_MAP_MODIFIER_mapper ||
+         !MapperIdentifier.isEmpty()) &&
+        "Mapper identifier must be explicitly specified with mapper modifier");
     Modifiers[Count] = MapTypeModifiers[I];
     ModifiersLoc[Count] = MapTypeModifiersLoc[I];
     ++Count;
   }
+
+  // Search for the "default" mapper if the name of mapper is not specified.
+  if (MapperIdentifier.isEmpty()) {
+    auto &DeclNames = getASTContext().DeclarationNames;
+    MapperIdentifier =
+        DeclNames.getIdentifier(&getASTContext().Idents.get("default"));
+  }
+  // Look up the associated mapper for each mapped variable.
 
   // We need to produce a map clause even if we don't have variables so that
   // other diagnostics related with non-existing map clauses are accurate.
