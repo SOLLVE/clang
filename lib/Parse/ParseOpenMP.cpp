@@ -499,8 +499,9 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
     if (Tok.isNot(tok::identifier) && Tok.isNot(tok::kw_default)) {
       Diag(Tok.getLocation(), diag::err_omp_mapper_illegal_identifier);
       IsCorrect = false;
-    } else
+    } else {
       MapperId = DeclNames.getIdentifier(Tok.getIdentifierInfo());
+    }
     ConsumeToken();
     // Consume ':'.
     ExpectAndConsume(tok::colon);
@@ -517,7 +518,7 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   DeclarationName VName;
   QualType MapperType;
   SourceRange Range;
-  TypeResult ParsedType = parseOpenMPDeclareMapperVarDecl(&Range, VName, AS);
+  TypeResult ParsedType = parseOpenMPDeclareMapperVarDecl(Range, VName, AS);
   if (ParsedType.isUsable())
     MapperType =
         Actions.ActOnOpenMPDeclareMapperType(Range.getBegin(), ParsedType);
@@ -586,7 +587,7 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   return DGP;
 }
 
-TypeResult Parser::parseOpenMPDeclareMapperVarDecl(SourceRange *Range,
+TypeResult Parser::parseOpenMPDeclareMapperVarDecl(SourceRange &Range,
                                                    DeclarationName &Name,
                                                    AccessSpecifier AS) {
   // Parse the common declaration-specifiers piece.
@@ -598,8 +599,7 @@ TypeResult Parser::parseOpenMPDeclareMapperVarDecl(SourceRange *Range,
   DeclaratorContext Context = DeclaratorContext::PrototypeContext;
   Declarator DeclaratorInfo(DS, Context);
   ParseDeclarator(DeclaratorInfo);
-  assert(Range);
-  *Range = DeclaratorInfo.getSourceRange();
+  Range = DeclaratorInfo.getSourceRange();
   if (DeclaratorInfo.getIdentifier() == nullptr) {
     Diag(Tok.getLocation(), diag::err_omp_mapper_expected_declarator);
     return true;

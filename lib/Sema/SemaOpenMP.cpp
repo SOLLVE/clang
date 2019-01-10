@@ -13584,8 +13584,8 @@ OMPClause *Sema::ActOnOpenMPHintClause(Expr *Hint, SourceLocation StartLoc,
                                        SourceLocation LParenLoc,
                                        SourceLocation EndLoc) {
   // OpenMP [2.13.2, critical construct, Description]
-  // ... where hint-expression is an integer constant expression that
-  // evaluates to a valid lock hint.
+  // ... where hint-expression is an integer constant expression that evaluates
+  // to a valid lock hint.
   ExprResult HintExpr = VerifyPositiveIntegerConstantInClause(Hint, OMPC_hint);
   if (HintExpr.isInvalid())
     return nullptr;
@@ -13621,8 +13621,8 @@ OMPClause *Sema::ActOnOpenMPDistScheduleClause(
       ValExpr = Val.get();
 
       // OpenMP [2.7.1, Restrictions]
-      //  chunk_size must be a loop invariant integer expression with a
-      //  positive value.
+      //  chunk_size must be a loop invariant integer expression with a positive
+      //  value.
       llvm::APSInt Result;
       if (ValExpr->isIntegerConstantExpr(Result, Context)) {
         if (Result.isSigned() && !Result.isStrictlyPositive()) {
@@ -13916,13 +13916,13 @@ OMPClause *Sema::ActOnOpenMPUseDevicePtrClause(ArrayRef<Expr *> VarList,
     PrivateCopies.push_back(VDPrivateRefExpr);
     Inits.push_back(VDInitRefExpr);
 
-    // We need to add a data sharing attribute for this variable to make sure
-    // it is correctly captured. A variable that shows up in a use_device_ptr
-    // has similar properties of a first private variable.
+    // We need to add a data sharing attribute for this variable to make sure it
+    // is correctly captured. A variable that shows up in a use_device_ptr has
+    // similar properties of a first private variable.
     DSAStack->addDSA(D, RefExpr->IgnoreParens(), OMPC_firstprivate, Ref);
 
-    // Create a mappable component for the list item. List items in this
-    // clause only need a component.
+    // Create a mappable component for the list item. List items in this clause
+    // only need a component.
     MVLI.VarBaseDeclarations.push_back(D);
     MVLI.VarComponents.resize(MVLI.VarComponents.size() + 1);
     MVLI.VarComponents.back().push_back(
@@ -14001,9 +14001,9 @@ OMPClause *Sema::ActOnOpenMPIsDevicePtrClause(ArrayRef<Expr *> VarList,
     // Record the expression we've just processed.
     MVLI.ProcessedVarList.push_back(SimpleRefExpr);
 
-    // Create a mappable component for the list item. List items in this
-    // clause only need a component. We use a null declaration to signal
-    // fields in 'this'.
+    // Create a mappable component for the list item. List items in this clause
+    // only need a component. We use a null declaration to signal fields in
+    // 'this'.
     assert((isa<DeclRefExpr>(SimpleRefExpr) ||
             isa<CXXThisExpr>(cast<MemberExpr>(SimpleRefExpr)->getBase())) &&
            "Unexpected device pointer expression!");

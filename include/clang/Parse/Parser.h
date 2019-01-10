@@ -2800,7 +2800,7 @@ private:
   /// Parses 'omp declare mapper' directive.
   DeclGroupPtrTy ParseOpenMPDeclareMapperDirective(AccessSpecifier AS);
   /// Parses variable declaration in 'omp declare mapper' directive.
-  TypeResult parseOpenMPDeclareMapperVarDecl(SourceRange *Range,
+  TypeResult parseOpenMPDeclareMapperVarDecl(SourceRange &Range,
                                              DeclarationName &Name,
                                              AccessSpecifier AS = AS_none);
 
