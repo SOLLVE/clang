@@ -1771,6 +1771,7 @@ void ASTDeclWriter::VisitOMPDeclareMapperDecl(OMPDeclareMapperDecl *D) {
   Record.push_back(D->clauselist_size());
   VisitValueDecl(D);
   Record.AddSourceLocation(D->getBeginLoc());
+  Record.AddStmt(D->getMapperVar());
   Record.AddDeclarationName(D->getVarName());
   Record.AddDeclRef(D->getPrevDeclInScope());
   OMPClauseWriter ClauseWriter(Record);

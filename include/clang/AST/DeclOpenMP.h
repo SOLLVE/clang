@@ -224,6 +224,9 @@ class OMPDeclareMapperDecl final : public ValueDecl, public DeclContext {
   // Number of clauses associated with this mapper declaration
   unsigned NumClauses = 0;
 
+  /// Mapper variable
+  Expr *MapperVar = nullptr;
+
   // Name of the mapper variable
   DeclarationName VarName;
 
@@ -293,6 +296,12 @@ public:
   clauselist_const_iterator clauselist_end() const {
     return getClauses().end();
   }
+
+  /// Get the variable declared in the mapper
+  Expr *getMapperVar() { return MapperVar; }
+  const Expr *getMapperVar() const { return MapperVar; }
+  /// Set the variable declared in the mapper
+  void setMapperVar(Expr *MapperVarE) { MapperVar = MapperVarE; }
 
   /// Get the name of the variable declared in the mapper
   DeclarationName getVarName() { return VarName; }

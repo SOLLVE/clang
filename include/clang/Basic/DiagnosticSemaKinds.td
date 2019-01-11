@@ -8943,7 +8943,7 @@ def err_omp_declare_reduction_redefinition : Error<"redefinition of user-defined
 def err_omp_mapper_wrong_type : Error<
   "mapper type must be of struct, union or class type">;
 def err_omp_declare_mapper_wrong_var : Error<
-  "only variable %0 are allowed in map clauses of this 'omp declare mapper' directive">;
+  "only variable %0 is allowed in map clauses of this 'omp declare mapper' directive">;
 def err_omp_declare_mapper_redefinition : Error<
   "redefinition of user-defined mapper for type %0 with name %1">;
 def err_omp_array_section_use : Error<"OpenMP array section is not allowed here">;

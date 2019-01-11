@@ -13462,6 +13462,8 @@ void Sema::ActOnOpenMPDeclareMapperDirectiveVarDecl(OMPDeclareMapperDecl *DMD,
     PushOnScopeChains(VD, S);
   else
     DMD->addDecl(VD);
+  Expr *MapperVarExpr = buildDeclRefExpr(*this, VD, MapperType, StartLoc);
+  DMD->setMapperVar(MapperVarExpr);
 }
 
 Sema::DeclGroupPtrTy
