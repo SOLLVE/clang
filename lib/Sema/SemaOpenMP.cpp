@@ -1,9 +1,8 @@
 //===--- SemaOpenMP.cpp - Semantic Analysis for OpenMP constructs ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -676,9 +675,13 @@ public:
   }
 
 };
-bool isParallelOrTaskRegion(OpenMPDirectiveKind DKind) {
-  return isOpenMPParallelDirective(DKind) || isOpenMPTaskingDirective(DKind) ||
-         isOpenMPTeamsDirective(DKind) || DKind == OMPD_unknown;
+
+bool isImplicitTaskingRegion(OpenMPDirectiveKind DKind) {
+  return isOpenMPParallelDirective(DKind) || isOpenMPTeamsDirective(DKind);
+}
+
+bool isImplicitOrExplicitTaskingRegion(OpenMPDirectiveKind DKind) {
+  return isImplicitTaskingRegion(DKind) || isOpenMPTaskingDirective(DKind) || DKind == OMPD_unknown;
 }
 
 } // namespace
@@ -819,7 +822,7 @@ DSAStackTy::DSAVarData DSAStackTy::getDSA(iterator &Iter,
           DVar.CKind = OMPC_firstprivate;
           return DVar;
         }
-      } while (I != E && !isParallelOrTaskRegion(I->Directive));
+      } while (I != E && !isImplicitTaskingRegion(I->Directive));
       DVar.CKind =
           (DVarTemp.CKind == OMPC_unknown) ? OMPC_firstprivate : OMPC_shared;
       return DVar;
@@ -1066,7 +1069,7 @@ bool DSAStackTy::isOpenMPLocal(VarDecl *D, iterator Iter) const {
   if (!isStackEmpty()) {
     iterator I = Iter, E = Stack.back().first.rend();
     Scope *TopScope = nullptr;
-    while (I != E && !isParallelOrTaskRegion(I->Directive) &&
+    while (I != E && !isImplicitOrExplicitTaskingRegion(I->Directive) &&
            !isOpenMPTargetExecutionDirective(I->Directive))
       ++I;
     if (I == E)
@@ -1076,6 +1079,51 @@ bool DSAStackTy::isOpenMPLocal(VarDecl *D, iterator Iter) const {
     while (CurScope != TopScope && !CurScope->isDeclScope(D))
       CurScope = CurScope->getParent();
     return CurScope != TopScope;
+  }
+  return false;
+}
+
+static bool isConstNotMutableType(Sema &SemaRef, QualType Type,
+                                  bool AcceptIfMutable = true,
+                                  bool *IsClassType = nullptr) {
+  ASTContext &Context = SemaRef.getASTContext();
+  Type = Type.getNonReferenceType().getCanonicalType();
+  bool IsConstant = Type.isConstant(Context);
+  Type = Context.getBaseElementType(Type);
+  const CXXRecordDecl *RD = AcceptIfMutable && SemaRef.getLangOpts().CPlusPlus
+                                ? Type->getAsCXXRecordDecl()
+                                : nullptr;
+  if (const auto *CTSD = dyn_cast_or_null<ClassTemplateSpecializationDecl>(RD))
+    if (const ClassTemplateDecl *CTD = CTSD->getSpecializedTemplate())
+      RD = CTD->getTemplatedDecl();
+  if (IsClassType)
+    *IsClassType = RD;
+  return IsConstant && !(SemaRef.getLangOpts().CPlusPlus && RD &&
+                         RD->hasDefinition() && RD->hasMutableFields());
+}
+
+static bool rejectConstNotMutableType(Sema &SemaRef, const ValueDecl *D,
+                                      QualType Type, OpenMPClauseKind CKind,
+                                      SourceLocation ELoc,
+                                      bool AcceptIfMutable = true,
+                                      bool ListItemNotVar = false) {
+  ASTContext &Context = SemaRef.getASTContext();
+  bool IsClassType;
+  if (isConstNotMutableType(SemaRef, Type, AcceptIfMutable, &IsClassType)) {
+    unsigned Diag = ListItemNotVar
+                        ? diag::err_omp_const_list_item
+                        : IsClassType ? diag::err_omp_const_not_mutable_variable
+                                      : diag::err_omp_const_variable;
+    SemaRef.Diag(ELoc, Diag) << getOpenMPClauseName(CKind);
+    if (!ListItemNotVar && D) {
+      const VarDecl *VD = dyn_cast<VarDecl>(D);
+      bool IsDecl = !VD || VD->isThisDeclarationADefinition(Context) ==
+                               VarDecl::DeclarationOnly;
+      SemaRef.Diag(D->getLocation(),
+                   IsDecl ? diag::note_previous_decl : diag::note_defined_here)
+          << D;
+    }
+    return true;
   }
   return false;
 }
@@ -1177,34 +1225,28 @@ const DSAStackTy::DSAVarData DSAStackTy::getTopDSA(ValueDecl *D,
     return DVar;
   }
 
-  QualType Type = D->getType().getNonReferenceType().getCanonicalType();
-  bool IsConstant = Type.isConstant(SemaRef.getASTContext());
-  Type = SemaRef.getASTContext().getBaseElementType(Type);
-  // OpenMP [2.9.1.1, Data-sharing Attribute Rules for Variables Referenced
-  // in a Construct, C/C++, predetermined, p.6]
-  //  Variables with const qualified type having no mutable member are
-  //  shared.
-  const CXXRecordDecl *RD =
-      SemaRef.getLangOpts().CPlusPlus ? Type->getAsCXXRecordDecl() : nullptr;
-  if (const auto *CTSD = dyn_cast_or_null<ClassTemplateSpecializationDecl>(RD))
-    if (const ClassTemplateDecl *CTD = CTSD->getSpecializedTemplate())
-      RD = CTD->getTemplatedDecl();
-  if (IsConstant &&
-      !(SemaRef.getLangOpts().CPlusPlus && RD && RD->hasDefinition() &&
-        RD->hasMutableFields())) {
-    // Variables with const-qualified type having no mutable member may be
-    // listed in a firstprivate clause, even if they are static data members.
-    DSAVarData DVarTemp = hasInnermostDSA(
-        D,
-        [](OpenMPClauseKind C) {
-          return C == OMPC_firstprivate || C == OMPC_shared;
-        },
-        MatchesAlways, FromParent);
-    if (DVarTemp.CKind != OMPC_unknown && DVarTemp.RefExpr)
-      return DVarTemp;
+  // The predetermined shared attribute for const-qualified types having no
+  // mutable members was removed after OpenMP 3.1.
+  if (SemaRef.LangOpts.OpenMP <= 31) {
+    // OpenMP [2.9.1.1, Data-sharing Attribute Rules for Variables Referenced
+    // in a Construct, C/C++, predetermined, p.6]
+    //  Variables with const qualified type having no mutable member are
+    //  shared.
+    if (isConstNotMutableType(SemaRef, D->getType())) {
+      // Variables with const-qualified type having no mutable member may be
+      // listed in a firstprivate clause, even if they are static data members.
+      DSAVarData DVarTemp = hasInnermostDSA(
+          D,
+          [](OpenMPClauseKind C) {
+            return C == OMPC_firstprivate || C == OMPC_shared;
+          },
+          MatchesAlways, FromParent);
+      if (DVarTemp.CKind != OMPC_unknown && DVarTemp.RefExpr)
+        return DVarTemp;
 
-    DVar.CKind = OMPC_shared;
-    return DVar;
+      DVar.CKind = OMPC_shared;
+      return DVar;
+    }
   }
 
   // Explicitly specified attributes and local variables with predetermined
@@ -1253,7 +1295,7 @@ DSAStackTy::hasDSA(ValueDecl *D,
   if (FromParent && I != EndI)
     std::advance(I, 1);
   for (; I != EndI; std::advance(I, 1)) {
-    if (!DPred(I->Directive) && !isParallelOrTaskRegion(I->Directive))
+    if (!DPred(I->Directive) && !isImplicitOrExplicitTaskingRegion(I->Directive))
       continue;
     iterator NewI = I;
     DSAVarData DVar = getDSA(NewI, D);
@@ -1597,7 +1639,7 @@ VarDecl *Sema::isOpenMPCapturedDecl(ValueDecl *D) {
     auto &&Info = DSAStack->isLoopControlVariable(D);
     if (Info.first ||
         (VD && VD->hasLocalStorage() &&
-         isParallelOrTaskRegion(DSAStack->getCurrentDirective())) ||
+         isImplicitOrExplicitTaskingRegion(DSAStack->getCurrentDirective())) ||
         (VD && DSAStack->isForceVarCapturing()))
       return VD ? VD : Info.second;
     DSAStackTy::DSAVarData DVarPrivate =
@@ -2205,7 +2247,7 @@ public:
       // attribute, must have its data-sharing attribute explicitly determined
       // by being listed in a data-sharing attribute clause.
       if (DVar.CKind == OMPC_unknown && Stack->getDefaultDSA() == DSA_none &&
-          isParallelOrTaskRegion(DKind) &&
+          isImplicitOrExplicitTaskingRegion(DKind) &&
           VarsWithInheritedDSA.count(VD) == 0) {
         VarsWithInheritedDSA[VD] = E;
         return;
@@ -3056,11 +3098,13 @@ static bool checkNestingOfRegions(Sema &SemaRef, const DSAStackTy *Stack,
       }
       return false;
     }
-    // Allow some constructs (except teams) to be orphaned (they could be
-    // used in functions, called from OpenMP regions with the required
-    // preconditions).
+    // Allow some constructs (except teams and cancellation constructs) to be
+    // orphaned (they could be used in functions, called from OpenMP regions
+    // with the required preconditions).
     if (ParentRegion == OMPD_unknown &&
-        !isOpenMPNestingTeamsDirective(CurrentRegion))
+        !isOpenMPNestingTeamsDirective(CurrentRegion) &&
+        CurrentRegion != OMPD_cancellation_point &&
+        CurrentRegion != OMPD_cancel)
       return false;
     if (CurrentRegion == OMPD_cancellation_point ||
         CurrentRegion == OMPD_cancel) {
@@ -3089,6 +3133,7 @@ static bool checkNestingOfRegions(Sema &SemaRef, const DSAStackTy *Stack,
             (CancelRegion == OMPD_sections &&
              (ParentRegion == OMPD_section || ParentRegion == OMPD_sections ||
               ParentRegion == OMPD_parallel_sections)));
+      OrphanSeen = ParentRegion == OMPD_unknown;
     } else if (CurrentRegion == OMPD_master) {
       // OpenMP [2.16, Nesting of Regions]
       // A master region may not be closely nested inside a worksharing,
@@ -4092,7 +4137,7 @@ bool OpenMPIterationSpaceChecker::setStep(Expr *NewStep, bool Subtract) {
     if (!TestIsLessOp.hasValue())
       TestIsLessOp = IsConstPos || (IsUnsigned && !Subtract);
     if (UB && (IsConstZero ||
-               (TestIsLessOp.getValue() ? 
+               (TestIsLessOp.getValue() ?
                   (IsConstNeg || (IsUnsigned && Subtract)) :
                   (IsConstPos || (IsUnsigned && !Subtract))))) {
       SemaRef.Diag(NewStep->getExprLoc(),
@@ -4267,7 +4312,7 @@ bool OpenMPIterationSpaceChecker::checkAndSetCond(Expr *S) {
                        Op == OO_Less || Op == OO_Greater, CE->getSourceRange(),
                        CE->getOperatorLoc());
         break;
-      case OO_ExclaimEqual: 
+      case OO_ExclaimEqual:
         return setUB(getInitLCDecl(CE->getArg(0)) == LCDecl ?
                      CE->getArg(1) : CE->getArg(0),
                      /*LessOp=*/llvm::None,
@@ -4525,7 +4570,7 @@ Expr *OpenMPIterationSpaceChecker::buildPreCond(
 
   ExprResult CondExpr =
       SemaRef.BuildBinOp(S, DefaultLoc,
-                         TestIsLessOp.getValue() ? 
+                         TestIsLessOp.getValue() ?
                            (TestIsStrictOp ? BO_LT : BO_LE) :
                            (TestIsStrictOp ? BO_GT : BO_GE),
                          NewLB.get(), NewUB.get());
@@ -5226,13 +5271,14 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
 
   // Choose either the 32-bit or 64-bit version.
   ExprResult LastIteration = LastIteration64;
-  if (LastIteration32.isUsable() &&
-      C.getTypeSize(LastIteration32.get()->getType()) == 32 &&
-      (AllCountsNeedLessThan32Bits || NestedLoopCount == 1 ||
-       fitsInto(
-           /*Bits=*/32,
-           LastIteration32.get()->getType()->hasSignedIntegerRepresentation(),
-           LastIteration64.get(), SemaRef)))
+  if (SemaRef.getLangOpts().OpenMPOptimisticCollapse ||
+      (LastIteration32.isUsable() &&
+       C.getTypeSize(LastIteration32.get()->getType()) == 32 &&
+       (AllCountsNeedLessThan32Bits || NestedLoopCount == 1 ||
+        fitsInto(
+            /*Bits=*/32,
+            LastIteration32.get()->getType()->hasSignedIntegerRepresentation(),
+            LastIteration64.get(), SemaRef))))
     LastIteration = LastIteration32;
   QualType VType = LastIteration.get()->getType();
   QualType RealVType = VType;
@@ -5534,30 +5580,58 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
   Built.Updates.resize(NestedLoopCount);
   Built.Finals.resize(NestedLoopCount);
   {
-    ExprResult Div;
-    // Go from inner nested loop to outer.
-    for (int Cnt = NestedLoopCount - 1; Cnt >= 0; --Cnt) {
+    // We implement the following algorithm for obtaining the
+    // original loop iteration variable values based on the
+    // value of the collapsed loop iteration variable IV.
+    //
+    // Let n+1 be the number of collapsed loops in the nest.
+    // Iteration variables (I0, I1, .... In)
+    // Iteration counts (N0, N1, ... Nn)
+    //
+    // Acc = IV;
+    //
+    // To compute Ik for loop k, 0 <= k <= n, generate:
+    //    Prod = N(k+1) * N(k+2) * ... * Nn;
+    //    Ik = Acc / Prod;
+    //    Acc -= Ik * Prod;
+    //
+    ExprResult Acc = IV;
+    for (unsigned int Cnt = 0; Cnt < NestedLoopCount; ++Cnt) {
       LoopIterationSpace &IS = IterSpaces[Cnt];
       SourceLocation UpdLoc = IS.IncSrcRange.getBegin();
-      // Build: Iter = (IV / Div) % IS.NumIters
-      // where Div is product of previous iterations' IS.NumIters.
       ExprResult Iter;
-      if (Div.isUsable()) {
-        Iter =
-            SemaRef.BuildBinOp(CurScope, UpdLoc, BO_Div, IV.get(), Div.get());
-      } else {
-        Iter = IV;
-        assert((Cnt == (int)NestedLoopCount - 1) &&
-               "unusable div expected on first iteration only");
-      }
 
-      if (Cnt != 0 && Iter.isUsable())
-        Iter = SemaRef.BuildBinOp(CurScope, UpdLoc, BO_Rem, Iter.get(),
-                                  IS.NumIterations);
+      // Compute prod
+      ExprResult Prod =
+          SemaRef.ActOnIntegerConstant(SourceLocation(), 1).get();
+      for (unsigned int K = Cnt+1; K < NestedLoopCount; ++K)
+        Prod = SemaRef.BuildBinOp(CurScope, UpdLoc, BO_Mul, Prod.get(),
+                                  IterSpaces[K].NumIterations);
+
+      // Iter = Acc / Prod
+      // If there is at least one more inner loop to avoid
+      // multiplication by 1.
+      if (Cnt + 1 < NestedLoopCount)
+        Iter = SemaRef.BuildBinOp(CurScope, UpdLoc, BO_Div,
+                                  Acc.get(), Prod.get());
+      else
+        Iter = Acc;
       if (!Iter.isUsable()) {
         HasErrors = true;
         break;
       }
+
+      // Update Acc:
+      // Acc -= Iter * Prod
+      // Check if there is at least one more inner loop to avoid
+      // multiplication by 1.
+      if (Cnt + 1 < NestedLoopCount)
+        Prod = SemaRef.BuildBinOp(CurScope, UpdLoc, BO_Mul,
+                                  Iter.get(), Prod.get());
+      else
+        Prod = Iter;
+      Acc = SemaRef.BuildBinOp(CurScope, UpdLoc, BO_Sub,
+                               Acc.get(), Prod.get());
 
       // Build update: IS.CounterVar(Private) = IS.Start + Iter * IS.Step
       auto *VD = cast<VarDecl>(cast<DeclRefExpr>(IS.CounterVar)->getDecl());
@@ -5587,22 +5661,6 @@ checkOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
         break;
       }
 
-      // Build Div for the next iteration: Div <- Div * IS.NumIters
-      if (Cnt != 0) {
-        if (Div.isUnset())
-          Div = IS.NumIterations;
-        else
-          Div = SemaRef.BuildBinOp(CurScope, UpdLoc, BO_Mul, Div.get(),
-                                   IS.NumIterations);
-
-        // Add parentheses (for debugging purposes only).
-        if (Div.isUsable())
-          Div = tryBuildCapture(SemaRef, Div.get(), Captures);
-        if (!Div.isUsable()) {
-          HasErrors = true;
-          break;
-        }
-      }
       if (!Update.isUsable() || !Final.isUsable()) {
         HasErrors = true;
         break;
@@ -9800,6 +9858,17 @@ OMPClause *Sema::ActOnOpenMPPrivateClause(ArrayRef<Expr *> VarList,
       continue;
     Type = Type.getNonReferenceType();
 
+    // OpenMP 5.0 [2.19.3, List Item Privatization, Restrictions]
+    // A variable that is privatized must not have a const-qualified type
+    // unless it is of class type with a mutable member. This restriction does
+    // not apply to the firstprivate clause.
+    //
+    // OpenMP 3.1 [2.9.3.3, private clause, Restrictions]
+    // A variable that appears in a private clause must not have a
+    // const-qualified type unless it is of class type with a mutable member.
+    if (rejectConstNotMutableType(*this, D, Type, OMPC_private, ELoc))
+      continue;
+
     // OpenMP [2.9.1.1, Data-sharing Attribute Rules for Variables Referenced
     // in a Construct]
     //  Variables with the predetermined data-sharing attributes may not be
@@ -10220,6 +10289,17 @@ OMPClause *Sema::ActOnOpenMPLastprivateClause(ArrayRef<Expr *> VarList,
                             diag::err_omp_lastprivate_incomplete_type))
       continue;
     Type = Type.getNonReferenceType();
+
+    // OpenMP 5.0 [2.19.3, List Item Privatization, Restrictions]
+    // A variable that is privatized must not have a const-qualified type
+    // unless it is of class type with a mutable member. This restriction does
+    // not apply to the firstprivate clause.
+    //
+    // OpenMP 3.1 [2.9.3.5, lastprivate clause, Restrictions]
+    // A variable that appears in a lastprivate clause must not have a
+    // const-qualified type unless it is of class type with a mutable member.
+    if (rejectConstNotMutableType(*this, D, Type, OMPC_lastprivate, ELoc))
+      continue;
 
     OpenMPDirectiveKind CurrDir = DSAStack->getCurrentDirective();
     // OpenMP [2.14.1.1, Data-sharing Attribute Rules for Variables Referenced
@@ -10930,17 +11010,9 @@ static bool actOnOMPReductionKindClause(
     // OpenMP [2.14.3.6, reduction clause, Restrictions]
     // A list item that appears in a reduction clause must not be
     // const-qualified.
-    if (Type.getNonReferenceType().isConstant(Context)) {
-      S.Diag(ELoc, diag::err_omp_const_reduction_list_item) << ERange;
-      if (!ASE && !OASE) {
-        bool IsDecl = !VD || VD->isThisDeclarationADefinition(Context) ==
-                                 VarDecl::DeclarationOnly;
-        S.Diag(D->getLocation(),
-               IsDecl ? diag::note_previous_decl : diag::note_defined_here)
-            << D;
-      }
+    if (rejectConstNotMutableType(S, D, Type, ClauseKind, ELoc,
+                                  /*AcceptIfMutable*/ false, ASE || OASE))
       continue;
-    }
 
     OpenMPDirectiveKind CurrDir = Stack->getCurrentDirective();
     // OpenMP [2.9.3.6, Restrictions, C/C++, p.4]
@@ -11487,20 +11559,12 @@ bool Sema::CheckOpenMPLinearDecl(const ValueDecl *D, SourceLocation ELoc,
   }
   Type = Type.getNonReferenceType();
 
-  // A list item must not be const-qualified.
-  if (Type.isConstant(Context)) {
-    Diag(ELoc, diag::err_omp_const_variable)
-        << getOpenMPClauseName(OMPC_linear);
-    if (D) {
-      bool IsDecl =
-          !VD ||
-          VD->isThisDeclarationADefinition(Context) == VarDecl::DeclarationOnly;
-      Diag(D->getLocation(),
-           IsDecl ? diag::note_previous_decl : diag::note_defined_here)
-          << D;
-    }
+  // OpenMP 5.0 [2.19.3, List Item Privatization, Restrictions]
+  // A variable that is privatized must not have a const-qualified type
+  // unless it is of class type with a mutable member. This restriction does
+  // not apply to the firstprivate clause.
+  if (rejectConstNotMutableType(*this, D, Type, OMPC_linear, ELoc))
     return true;
-  }
 
   // A list item must be of integral or pointer type.
   Type = Type.getUnqualifiedType().getCanonicalType();
@@ -13073,7 +13137,7 @@ Sema::ActOnOpenMPMapClause(ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
       continue;
     }
     assert(Count < OMPMapClause::NumberOfModifiers &&
-           "Modifiers exceed the allowed number of map type modifiers"); 
+           "Modifiers exceed the allowed number of map type modifiers");
     Modifiers[Count] = MapTypeModifiers[I];
     ModifiersLoc[Count] = MapTypeModifiersLoc[I];
     ++Count;
