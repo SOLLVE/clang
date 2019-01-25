@@ -539,7 +539,6 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   OMPDeclareMapperDecl *DMD = Actions.ActOnOpenMPDeclareMapperDirectiveStart(
       getCurScope(), Actions.getCurLexicalContext(), MapperId, MapperType,
       Range.getBegin(), VName, AS);
-
   DeclarationNameInfo DirName;
   SourceLocation Loc = Tok.getLocation();
   unsigned ScopeFlags = Scope::FnScope | Scope::DeclScope |
@@ -547,10 +546,11 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   ParseScope OMPDirectiveScope(this, ScopeFlags);
   Actions.StartOpenMPDSABlock(OMPD_declare_mapper, DirName, getCurScope(), Loc);
 
+  // Add the mapper variable declaration.
   Actions.ActOnOpenMPDeclareMapperDirectiveVarDecl(
       DMD, getCurScope(), MapperType, Range.getBegin(), VName);
 
-  // Parse map clauses
+  // Parse map clauses.
   SmallVector<OMPClause *, 6> Clauses;
   while (Tok.isNot(tok::annot_pragma_openmp_end)) {
     OpenMPClauseKind CKind = Tok.isAnnotation()
@@ -580,7 +580,6 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
 
   DeclGroupPtrTy DGP =
       Actions.ActOnOpenMPDeclareMapperDirectiveEnd(DMD, getCurScope(), Clauses);
-
   if (!IsCorrect)
     return DeclGroupPtrTy();
   return DGP;

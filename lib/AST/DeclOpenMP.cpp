@@ -145,9 +145,11 @@ OMPDeclareMapperDecl *OMPDeclareMapperDecl::CreateDeserialized(ASTContext &C,
       OMPDeclareMapperDecl(OMPDeclareMapper, /*DC=*/nullptr, SourceLocation(),
                            DeclarationName(), QualType(), DeclarationName(),
                            /*PrevDeclInScope=*/nullptr);
-  D->NumClauses = N;
-  if (N)
-    D->Clauses = (OMPClause **)C.Allocate(sizeof(OMPClause *) * N);
+  if (N) {
+    OMPClause **ClauseStorage =
+        (OMPClause **)C.Allocate(sizeof(OMPClause *) * N);
+    D->Clauses = MutableArrayRef<OMPClause *>(ClauseStorage, N);
+  }
   return D;
 }
 
@@ -157,18 +159,20 @@ OMPDeclareMapperDecl *OMPDeclareMapperDecl::CreateDeserialized(ASTContext &C,
 /// OMPDeclareMapperDecl
 void OMPDeclareMapperDecl::CreateClauses(ASTContext &C,
                                          ArrayRef<OMPClause *> CL) {
-  assert(NumClauses == 0 && "Number of clauses should be 0 on initialization");
-  NumClauses = CL.size();
+  assert(Clauses.empty() && "Number of clauses should be 0 on initialization");
+  auto NumClauses = CL.size();
   if (NumClauses) {
-    Clauses = (OMPClause **)C.Allocate(sizeof(OMPClause *) * NumClauses);
+    OMPClause **ClauseStorage =
+        (OMPClause **)C.Allocate(sizeof(OMPClause *) * NumClauses);
+    Clauses = MutableArrayRef<OMPClause *>(ClauseStorage, NumClauses);
     setClauses(CL);
   }
 }
 
 void OMPDeclareMapperDecl::setClauses(ArrayRef<OMPClause *> CL) {
-  assert(CL.size() == NumClauses &&
+  assert(CL.size() == Clauses.size() &&
          "Number of clauses is not the same as the preallocated buffer");
-  std::uninitialized_copy(CL.begin(), CL.end(), Clauses);
+  std::uninitialized_copy(CL.begin(), CL.end(), Clauses.data());
 }
 
 //===----------------------------------------------------------------------===//

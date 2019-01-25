@@ -218,12 +218,9 @@ class OMPDeclareMapperDecl final : public ValueDecl, public DeclContext {
   friend class ASTDeclReader;
 
   // Clauses assoicated with this mapper declaration
-  OMPClause **Clauses = nullptr;
+  MutableArrayRef<OMPClause *> Clauses;
 
-  // Number of clauses associated with this mapper declaration
-  unsigned NumClauses = 0;
-
-  /// Mapper variable
+  // Mapper variable, which is 'v' in the example above
   Expr *MapperVar = nullptr;
 
   // Name of the mapper variable
@@ -239,17 +236,6 @@ class OMPDeclareMapperDecl final : public ValueDecl, public DeclContext {
                        OMPDeclareMapperDecl *PrevDeclInScope)
       : ValueDecl(DK, DC, L, Name, Ty), DeclContext(DK), VarName(VarName),
         PrevDeclInScope(PrevDeclInScope) {}
-
-  /// Returns an array of immutable clauses associated with this mapper
-  /// declaration
-  ArrayRef<const OMPClause *> getClauses() const {
-    return llvm::makeArrayRef(Clauses, NumClauses);
-  }
-
-  /// Returns an array of clauses associated with this mapper declaration
-  MutableArrayRef<OMPClause *> getClauses() {
-    return MutableArrayRef<OMPClause *>(Clauses, NumClauses);
-  }
 
   void setPrevDeclInScope(OMPDeclareMapperDecl *Prev) {
     PrevDeclInScope = Prev;
@@ -278,8 +264,8 @@ public:
   using clauselist_const_range =
       llvm::iterator_range<clauselist_const_iterator>;
 
-  unsigned clauselist_size() const { return NumClauses; }
-  bool clauselist_empty() const { return NumClauses == 0; }
+  unsigned clauselist_size() const { return Clauses.size(); }
+  bool clauselist_empty() const { return Clauses.empty(); }
 
   clauselist_range clauselists() {
     return clauselist_range(clauselist_begin(), clauselist_end());
@@ -287,13 +273,13 @@ public:
   clauselist_const_range clauselists() const {
     return clauselist_const_range(clauselist_begin(), clauselist_end());
   }
-  clauselist_iterator clauselist_begin() { return getClauses().begin(); }
-  clauselist_iterator clauselist_end() { return getClauses().end(); }
+  clauselist_iterator clauselist_begin() { return Clauses.begin(); }
+  clauselist_iterator clauselist_end() { return Clauses.end(); }
   clauselist_const_iterator clauselist_begin() const {
-    return getClauses().begin();
+    return static_cast<ArrayRef<const OMPClause *>>(Clauses).begin();
   }
   clauselist_const_iterator clauselist_end() const {
-    return getClauses().end();
+    return static_cast<ArrayRef<const OMPClause *>>(Clauses).end();
   }
 
   /// Get the variable declared in the mapper
