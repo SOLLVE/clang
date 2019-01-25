@@ -217,13 +217,13 @@ public:
 class OMPDeclareMapperDecl final : public ValueDecl, public DeclContext {
   friend class ASTDeclReader;
 
-  // Clauses assoicated with this mapper declaration
+  /// Clauses assoicated with this mapper declaration
   MutableArrayRef<OMPClause *> Clauses;
 
-  // Mapper variable, which is 'v' in the example above
-  Expr *MapperVar = nullptr;
+  /// Mapper variable, which is 'v' in the example above
+  Expr *MapperVarRef = nullptr;
 
-  // Name of the mapper variable
+  /// Name of the mapper variable
   DeclarationName VarName;
 
   LazyDeclPtr PrevDeclInScope;
@@ -275,23 +275,19 @@ public:
   }
   clauselist_iterator clauselist_begin() { return Clauses.begin(); }
   clauselist_iterator clauselist_end() { return Clauses.end(); }
-  clauselist_const_iterator clauselist_begin() const {
-    return static_cast<ArrayRef<const OMPClause *>>(Clauses).begin();
-  }
-  clauselist_const_iterator clauselist_end() const {
-    return static_cast<ArrayRef<const OMPClause *>>(Clauses).end();
-  }
+  clauselist_const_iterator clauselist_begin() const { return Clauses.begin(); }
+  clauselist_const_iterator clauselist_end() const { return Clauses.end(); }
 
   /// Get the variable declared in the mapper
-  Expr *getMapperVar() { return MapperVar; }
-  const Expr *getMapperVar() const { return MapperVar; }
+  Expr *getMapperVarRef() { return MapperVarRef; }
+  const Expr *getMapperVarRef() const { return MapperVarRef; }
   /// Set the variable declared in the mapper
-  void setMapperVar(Expr *MapperVarE) { MapperVar = MapperVarE; }
+  void setMapperVarRef(Expr *MapperVarRefE) { MapperVarRef = MapperVarRefE; }
 
   /// Get the name of the variable declared in the mapper
   DeclarationName getVarName() { return VarName; }
 
-  /// Get reference to previous declare reduction construct in the same
+  /// Get reference to previous declare mapper construct in the same
   /// scope with the same name.
   OMPDeclareMapperDecl *getPrevDeclInScope() {
     return cast_or_null<OMPDeclareMapperDecl>(

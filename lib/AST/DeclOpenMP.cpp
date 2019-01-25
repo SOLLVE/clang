@@ -133,22 +133,20 @@ OMPDeclareMapperDecl::Create(ASTContext &C, DeclContext *DC, SourceLocation L,
                              DeclarationName Name, QualType T,
                              DeclarationName VarName,
                              OMPDeclareMapperDecl *PrevDeclInScope) {
-  OMPDeclareMapperDecl *D = new (C, DC) OMPDeclareMapperDecl(
-      OMPDeclareMapper, DC, L, Name, T, VarName, PrevDeclInScope);
-  return D;
+  return new (C, DC) OMPDeclareMapperDecl(OMPDeclareMapper, DC, L, Name, T,
+                                          VarName, PrevDeclInScope);
 }
 
 OMPDeclareMapperDecl *OMPDeclareMapperDecl::CreateDeserialized(ASTContext &C,
                                                                unsigned ID,
                                                                unsigned N) {
-  OMPDeclareMapperDecl *D = new (C, ID)
+  auto *D = new (C, ID)
       OMPDeclareMapperDecl(OMPDeclareMapper, /*DC=*/nullptr, SourceLocation(),
                            DeclarationName(), QualType(), DeclarationName(),
                            /*PrevDeclInScope=*/nullptr);
   if (N) {
-    OMPClause **ClauseStorage =
-        (OMPClause **)C.Allocate(sizeof(OMPClause *) * N);
-    D->Clauses = MutableArrayRef<OMPClause *>(ClauseStorage, N);
+    auto **ClauseStorage = C.Allocate<OMPClause *>(N);
+    D->Clauses = llvm::makeMutableArrayRef<OMPClause *>(ClauseStorage, N);
   }
   return D;
 }
@@ -160,11 +158,10 @@ OMPDeclareMapperDecl *OMPDeclareMapperDecl::CreateDeserialized(ASTContext &C,
 void OMPDeclareMapperDecl::CreateClauses(ASTContext &C,
                                          ArrayRef<OMPClause *> CL) {
   assert(Clauses.empty() && "Number of clauses should be 0 on initialization");
-  auto NumClauses = CL.size();
+  size_t NumClauses = CL.size();
   if (NumClauses) {
-    OMPClause **ClauseStorage =
-        (OMPClause **)C.Allocate(sizeof(OMPClause *) * NumClauses);
-    Clauses = MutableArrayRef<OMPClause *>(ClauseStorage, NumClauses);
+    auto **ClauseStorage = C.Allocate<OMPClause *>(NumClauses);
+    Clauses = llvm::makeMutableArrayRef<OMPClause *>(ClauseStorage, NumClauses);
     setClauses(CL);
   }
 }

@@ -41,7 +41,7 @@ enum OpenMPDirectiveKindEx {
   OMPD_distribute_parallel,
   OMPD_teams_distribute_parallel,
   OMPD_target_teams_distribute_parallel,
-  OMPD_mapper
+  OMPD_mapper,
 };
 
 class ThreadprivateListParserHelper final {
@@ -568,7 +568,7 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
       ConsumeToken();
     Actions.EndOpenMPClause();
   }
-  if (Clauses.size() == 0) {
+  if (Clauses.empty()) {
     Diag(Tok, diag::err_omp_expected_clause)
         << getOpenMPDirectiveName(OMPD_declare_mapper);
     IsCorrect = false;
