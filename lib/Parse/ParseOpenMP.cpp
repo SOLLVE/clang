@@ -1,9 +1,8 @@
 //===--- ParseOpenMP.cpp - OpenMP directives parsing ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -42,7 +41,7 @@ enum OpenMPDirectiveKindEx {
   OMPD_distribute_parallel,
   OMPD_teams_distribute_parallel,
   OMPD_target_teams_distribute_parallel,
-  OMPD_mapper
+  OMPD_mapper,
 };
 
 class ThreadprivateListParserHelper final {
@@ -499,8 +498,9 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
     if (Tok.isNot(tok::identifier) && Tok.isNot(tok::kw_default)) {
       Diag(Tok.getLocation(), diag::err_omp_mapper_illegal_identifier);
       IsCorrect = false;
-    } else
+    } else {
       MapperId = DeclNames.getIdentifier(Tok.getIdentifierInfo());
+    }
     ConsumeToken();
     // Consume ':'.
     ExpectAndConsume(tok::colon);
@@ -517,7 +517,7 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   DeclarationName VName;
   QualType MapperType;
   SourceRange Range;
-  TypeResult ParsedType = parseOpenMPDeclareMapperVarDecl(&Range, VName, AS);
+  TypeResult ParsedType = parseOpenMPDeclareMapperVarDecl(Range, VName, AS);
   if (ParsedType.isUsable())
     MapperType =
         Actions.ActOnOpenMPDeclareMapperType(Range.getBegin(), ParsedType);
@@ -539,7 +539,6 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   OMPDeclareMapperDecl *DMD = Actions.ActOnOpenMPDeclareMapperDirectiveStart(
       getCurScope(), Actions.getCurLexicalContext(), MapperId, MapperType,
       Range.getBegin(), VName, AS);
-
   DeclarationNameInfo DirName;
   SourceLocation Loc = Tok.getLocation();
   unsigned ScopeFlags = Scope::FnScope | Scope::DeclScope |
@@ -547,10 +546,11 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
   ParseScope OMPDirectiveScope(this, ScopeFlags);
   Actions.StartOpenMPDSABlock(OMPD_declare_mapper, DirName, getCurScope(), Loc);
 
+  // Add the mapper variable declaration.
   Actions.ActOnOpenMPDeclareMapperDirectiveVarDecl(
       DMD, getCurScope(), MapperType, Range.getBegin(), VName);
 
-  // Parse map clauses
+  // Parse map clauses.
   SmallVector<OMPClause *, 6> Clauses;
   while (Tok.isNot(tok::annot_pragma_openmp_end)) {
     OpenMPClauseKind CKind = Tok.isAnnotation()
@@ -568,7 +568,7 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
       ConsumeToken();
     Actions.EndOpenMPClause();
   }
-  if (Clauses.size() == 0) {
+  if (Clauses.empty()) {
     Diag(Tok, diag::err_omp_expected_clause)
         << getOpenMPDirectiveName(OMPD_declare_mapper);
     IsCorrect = false;
@@ -580,13 +580,12 @@ Parser::ParseOpenMPDeclareMapperDirective(AccessSpecifier AS) {
 
   DeclGroupPtrTy DGP =
       Actions.ActOnOpenMPDeclareMapperDirectiveEnd(DMD, getCurScope(), Clauses);
-
   if (!IsCorrect)
     return DeclGroupPtrTy();
   return DGP;
 }
 
-TypeResult Parser::parseOpenMPDeclareMapperVarDecl(SourceRange *Range,
+TypeResult Parser::parseOpenMPDeclareMapperVarDecl(SourceRange &Range,
                                                    DeclarationName &Name,
                                                    AccessSpecifier AS) {
   // Parse the common declaration-specifiers piece.
@@ -598,8 +597,7 @@ TypeResult Parser::parseOpenMPDeclareMapperVarDecl(SourceRange *Range,
   DeclaratorContext Context = DeclaratorContext::PrototypeContext;
   Declarator DeclaratorInfo(DS, Context);
   ParseDeclarator(DeclaratorInfo);
-  assert(Range);
-  *Range = DeclaratorInfo.getSourceRange();
+  Range = DeclaratorInfo.getSourceRange();
   if (DeclaratorInfo.getIdentifier() == nullptr) {
     Diag(Tok.getLocation(), diag::err_omp_mapper_expected_declarator);
     return true;

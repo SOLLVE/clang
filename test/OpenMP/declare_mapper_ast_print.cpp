@@ -30,16 +30,23 @@ public:
 template <class T>
 class dat {
 public:
+  class datin {
+  public:
+    T in;
+  };
   int i;
   T d;
 #pragma omp declare mapper(id: N1::vec v) map(v.len)
+#pragma omp declare mapper(id: datin v) map(v.in)
 };
 
 // CHECK: template <class T> class dat {
 // CHECK: #pragma omp declare mapper (id : N1::vec v) map(tofrom: v.len){{$}}
+// CHECK: #pragma omp declare mapper (id : dat::datin v) map(tofrom: v.in){{$}}
 // CHECK: };
 // CHECK: template<> class dat<double> {
 // CHECK: #pragma omp declare mapper (id : N1::vec v) map(tofrom: v.len){{$}}
+// CHECK: #pragma omp declare mapper (id : dat<double>::datin v) map(tofrom: v.in){{$}}
 // CHECK: };
 
 #pragma omp declare mapper(default : N1::vec kk) map(kk.len) map(kk.data[0:2])
@@ -49,6 +56,10 @@ public:
 
 template <typename T>
 T foo(T a) {
+  struct foodat {
+    T a;
+  };
+#pragma omp declare mapper(struct foodat v) map(v.a)
 #pragma omp declare mapper(id: N1::vec v) map(v.len)
   {
 #pragma omp declare mapper(id: N1::vec v) map(v.len)
@@ -57,12 +68,14 @@ T foo(T a) {
 }
 
 // CHECK: template <typename T> T foo(T a) {
+// CHECK: #pragma omp declare mapper (default : struct foodat v) map(tofrom: v.a)
 // CHECK: #pragma omp declare mapper (id : N1::vec v) map(tofrom: v.len)
 // CHECK: {
 // CHECK: #pragma omp declare mapper (id : N1::vec v) map(tofrom: v.len)
 // CHECK: }
 // CHECK: }
 // CHECK: template<> int foo<int>(int a) {
+// CHECK: #pragma omp declare mapper (default : struct foodat v) map(tofrom: v.a)
 // CHECK: #pragma omp declare mapper (id : N1::vec v) map(tofrom: v.len)
 // CHECK: {
 // CHECK: #pragma omp declare mapper (id : N1::vec v) map(tofrom: v.len)

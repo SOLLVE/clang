@@ -1,9 +1,8 @@
 //===--- DeclPrinter.cpp - Printing implementation for Decl ASTs ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1610,10 +1609,9 @@ void DeclPrinter::VisitOMPDeclareMapperDecl(OMPDeclareMapperDecl *D) {
     Out << ")";
     if (!D->clauselist_empty()) {
       OMPClausePrinter Printer(Out, Policy);
-      for (auto I = D->clauselist_begin(), E = D->clauselist_end(); I != E;
-           ++I) {
+      for (auto *C : D->clauselists()) {
         Out << " ";
-        Printer.Visit(*I);
+        Printer.Visit(C);
       }
     }
   }
