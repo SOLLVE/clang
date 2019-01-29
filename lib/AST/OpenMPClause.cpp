@@ -790,17 +790,16 @@ unsigned OMPClauseMappableExprCommon::getUniqueDeclarationsTotalNumber(
   return TotalNum;
 }
 
-OMPMapClause *OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
-                                   SourceLocation LParenLoc,
-                                   SourceLocation EndLoc, ArrayRef<Expr *> Vars,
-                                   ArrayRef<ValueDecl *> Declarations,
-                                   MappableExprComponentListsRef ComponentLists,
-                                   ArrayRef<OMPDeclareMapperDecl *> UDMappers,
-                                   ArrayRef<OpenMPMapModifierKind> MapModifiers,
-                                   ArrayRef<SourceLocation> MapModifiersLoc,
-                                   OpenMPMapClauseKind Type,
-                                   bool TypeIsImplicit,
-                                   SourceLocation TypeLoc) {
+OMPMapClause *
+OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
+                     SourceLocation LParenLoc, SourceLocation EndLoc,
+                     ArrayRef<Expr *> Vars, ArrayRef<ValueDecl *> Declarations,
+                     MappableExprComponentListsRef ComponentLists,
+                     ArrayRef<OMPDeclareMapperDecl *> UDMappers,
+                     ArrayRef<OpenMPMapModifierKind> MapModifiers,
+                     ArrayRef<SourceLocation> MapModifiersLoc,
+                     DeclarationName MapperId, OpenMPMapClauseKind Type,
+                     bool TypeIsImplicit, SourceLocation TypeLoc) {
   unsigned NumVars = Vars.size();
   unsigned NumUniqueDeclarations =
       getUniqueDeclarationsTotalNumber(Declarations);
@@ -825,9 +824,9 @@ OMPMapClause *OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
           NumVars, NumVars, NumUniqueDeclarations,
           NumUniqueDeclarations + NumComponentLists, NumComponents));
   OMPMapClause *Clause = new (Mem) OMPMapClause(
-      MapModifiers, MapModifiersLoc, Type, TypeIsImplicit, TypeLoc, StartLoc,
-      LParenLoc, EndLoc, NumVars, NumUniqueDeclarations, NumComponentLists,
-      NumComponents);
+      MapModifiers, MapModifiersLoc, MapperId, Type, TypeIsImplicit, TypeLoc,
+      StartLoc, LParenLoc, EndLoc, NumVars, NumUniqueDeclarations,
+      NumComponentLists, NumComponents);
 
   Clause->setVarRefs(Vars);
   Clause->setUDMappers(UDMappers);

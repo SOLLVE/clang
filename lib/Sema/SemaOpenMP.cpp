@@ -12920,15 +12920,17 @@ struct MappableVarListInfo {
 
 // Check the validity of the provided variable list for the provided clause kind
 // \a CKind. In the check process the valid expressions, and mappable expression
-// components and variables are extracted and used to fill \a Vars,
-// \a ClauseComponents, and \a ClauseBaseDeclarations. \a MapType and
-// \a IsMapTypeImplicit are expected to be valid if the clause kind is 'map'.
+// components and variables are extracted and used to fill \a ProcessedVarList,
+// \a VarComponents, \a VarBaseDeclarations, and \a UDMapperList in MVLI. \a
+// MapType, \a IsMapTypeImplicit, and \a MapperId are expected to be valid if
+// the clause kind is 'map'.
 static void
 checkMappableExpressionList(Sema &SemaRef, DSAStackTy *DSAS,
                             OpenMPClauseKind CKind, MappableVarListInfo &MVLI,
                             SourceLocation StartLoc,
                             OpenMPMapClauseKind MapType = OMPC_MAP_unknown,
-                            bool IsMapTypeImplicit = false) {
+                            bool IsMapTypeImplicit = false,
+                            DeclarationName MapperId = DeclarationName()) {
   // We only expect mappable expressions in 'to', 'from', and 'map' clauses.
   assert((CKind == OMPC_map || CKind == OMPC_to || CKind == OMPC_from) &&
          "Unexpected clause kind with mappable expressions!");
@@ -13130,10 +13132,6 @@ Sema::ActOnOpenMPMapClause(ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
                            SourceLocation MapLoc, SourceLocation ColonLoc,
                            ArrayRef<Expr *> VarList, SourceLocation StartLoc,
                            SourceLocation LParenLoc, SourceLocation EndLoc) {
-  MappableVarListInfo MVLI(VarList);
-  checkMappableExpressionList(*this, DSAStack, OMPC_map, MVLI, StartLoc,
-                              MapType, IsMapTypeImplicit);
-
   OpenMPMapModifierKind Modifiers[] = {OMPC_MAP_MODIFIER_unknown,
                                        OMPC_MAP_MODIFIER_unknown,
                                        OMPC_MAP_MODIFIER_unknown};
@@ -13158,20 +13156,24 @@ Sema::ActOnOpenMPMapClause(ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
     ++Count;
   }
 
-  // Search for the "default" mapper if the name of mapper is not specified.
+  // If the identifier of user-defined mapper is not specified, it is "default".
   if (MapperIdentifier.isEmpty()) {
     auto &DeclNames = getASTContext().DeclarationNames;
     MapperIdentifier =
         DeclNames.getIdentifier(&getASTContext().Idents.get("default"));
   }
-  // Look up the associated mapper for each mapped variable.
+
+  MappableVarListInfo MVLI(VarList);
+  checkMappableExpressionList(*this, DSAStack, OMPC_map, MVLI, StartLoc,
+                              MapType, IsMapTypeImplicit, MapperIdentifier);
 
   // We need to produce a map clause even if we don't have variables so that
   // other diagnostics related with non-existing map clauses are accurate.
   return OMPMapClause::Create(Context, StartLoc, LParenLoc, EndLoc,
                               MVLI.ProcessedVarList, MVLI.VarBaseDeclarations,
                               MVLI.VarComponents, MVLI.UDMapperList, Modifiers,
-                              ModifiersLoc, MapType, IsMapTypeImplicit, MapLoc);
+                              ModifiersLoc, MapperIdentifier, MapType,
+                              IsMapTypeImplicit, MapLoc);
 }
 
 QualType Sema::ActOnOpenMPDeclareReductionType(SourceLocation TyLoc,

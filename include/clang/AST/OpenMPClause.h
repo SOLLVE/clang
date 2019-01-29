@@ -4100,6 +4100,7 @@ private:
   ///
   /// \param MapModifiers Map-type-modifiers.
   /// \param MapModifiersLoc Locations of map-type-modifiers.
+  /// \param MapperIdentifier The identifier of associated user-defined mapper.
   /// \param MapType Map type.
   /// \param MapTypeIsImplicit Map type is inferred implicitly.
   /// \param MapLoc Location of the map type.
@@ -4112,6 +4113,7 @@ private:
   /// \param NumComponents Total number of expression components in the clause.
   explicit OMPMapClause(ArrayRef<OpenMPMapModifierKind> MapModifiers,
                         ArrayRef<SourceLocation> MapModifiersLoc,
+                        DeclarationName MapperIdentifier,
                         OpenMPMapClauseKind MapType, bool MapTypeIsImplicit,
                         SourceLocation MapLoc, SourceLocation StartLoc,
                         SourceLocation LParenLoc, SourceLocation EndLoc,
@@ -4120,16 +4122,16 @@ private:
       : OMPMappableExprListClause(OMPC_map, StartLoc, LParenLoc, EndLoc,
                                   NumVars, NumUniqueDeclarations,
                                   NumComponentLists, NumComponents),
-        MapType(MapType), MapTypeIsImplicit(MapTypeIsImplicit),
-        MapLoc(MapLoc) {
-          assert(llvm::array_lengthof(MapTypeModifiers) == MapModifiers.size()
-                 && "Unexpected number of map type modifiers.");
-          llvm::copy(MapModifiers, std::begin(MapTypeModifiers));
+        MapperIdentifier(MapperIdentifier), MapType(MapType),
+        MapTypeIsImplicit(MapTypeIsImplicit), MapLoc(MapLoc) {
+    assert(llvm::array_lengthof(MapTypeModifiers) == MapModifiers.size() &&
+           "Unexpected number of map type modifiers.");
+    llvm::copy(MapModifiers, std::begin(MapTypeModifiers));
 
-          assert(llvm::array_lengthof(MapTypeModifiersLoc) ==
-                     MapModifiersLoc.size() &&
-                 "Unexpected number of map type modifier locations.");
-          llvm::copy(MapModifiersLoc, std::begin(MapTypeModifiersLoc));
+    assert(llvm::array_lengthof(MapTypeModifiersLoc) ==
+               MapModifiersLoc.size() &&
+           "Unexpected number of map type modifier locations.");
+    llvm::copy(MapModifiersLoc, std::begin(MapTypeModifiersLoc));
   }
 
   /// Build an empty clause.
@@ -4199,19 +4201,19 @@ public:
   /// the clause.
   /// \param MapModifiers Map-type-modifiers.
   /// \param MapModifiersLoc Location of map-type-modifiers.
+  /// \param MapperId The identifier of associated user-defined mapper.
   /// \param Type Map type.
   /// \param TypeIsImplicit Map type is inferred implicitly.
   /// \param TypeLoc Location of the map type.
-  static OMPMapClause *Create(const ASTContext &C, SourceLocation StartLoc,
-                              SourceLocation LParenLoc, SourceLocation EndLoc,
-                              ArrayRef<Expr *> Vars,
-                              ArrayRef<ValueDecl *> Declarations,
-                              MappableExprComponentListsRef ComponentLists,
-                              ArrayRef<OMPDeclareMapperDecl *> UDMappers,
-                              ArrayRef<OpenMPMapModifierKind> MapModifiers,
-                              ArrayRef<SourceLocation> MapModifiersLoc,
-                              OpenMPMapClauseKind Type, bool TypeIsImplicit,
-                              SourceLocation TypeLoc);
+  static OMPMapClause *
+  Create(const ASTContext &C, SourceLocation StartLoc, SourceLocation LParenLoc,
+         SourceLocation EndLoc, ArrayRef<Expr *> Vars,
+         ArrayRef<ValueDecl *> Declarations,
+         MappableExprComponentListsRef ComponentLists,
+         ArrayRef<OMPDeclareMapperDecl *> UDMappers,
+         ArrayRef<OpenMPMapModifierKind> MapModifiers,
+         ArrayRef<SourceLocation> MapModifiersLoc, DeclarationName MapperId,
+         OpenMPMapClauseKind Type, bool TypeIsImplicit, SourceLocation TypeLoc);
 
   /// Creates an empty clause with the place for \a NumVars original
   /// expressions, \a NumUniqueDeclarations declarations, \NumComponentLists
