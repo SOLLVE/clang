@@ -4040,10 +4040,11 @@ public:
 /// \endcode
 /// In this example directive '#pragma omp target' has clause 'map'
 /// with the variables 'a' and 'b'.
-class OMPMapClause final : public OMPMappableExprListClause<OMPMapClause>,
-                           private llvm::TrailingObjects<
-                               OMPMapClause, Expr *, ValueDecl *, unsigned,
-                               OMPClauseMappableExprCommon::MappableComponent> {
+class OMPMapClause final
+    : public OMPMappableExprListClause<OMPMapClause>,
+      private llvm::TrailingObjects<
+          OMPMapClause, Expr *, OMPDeclareMapperDecl *, ValueDecl *, unsigned,
+          OMPClauseMappableExprCommon::MappableComponent> {
   friend class OMPClauseReader;
   friend OMPMappableExprListClause;
   friend OMPVarListClause;
@@ -4052,6 +4053,9 @@ class OMPMapClause final : public OMPMappableExprListClause<OMPMapClause>,
   /// Define the sizes of each trailing object array except the last one. This
   /// is required for TrailingObjects to work properly.
   size_t numTrailingObjects(OverloadToken<Expr *>) const {
+    return varlist_size();
+  }
+  size_t numTrailingObjects(OverloadToken<OMPDeclareMapperDecl *>) const {
     return varlist_size();
   }
   size_t numTrailingObjects(OverloadToken<ValueDecl *>) const {
@@ -4077,9 +4081,6 @@ private:
 
   /// User-defined mapper identifier, if any
   DeclarationName MapperIdentifier;
-
-  /// Corresponding user-defined mapper, if any
-  OMPDeclareMapperDecl *Mapper = nullptr;
 
   /// Map type for the 'map' clause.
   OpenMPMapClauseKind MapType = OMPC_MAP_unknown;
@@ -4177,6 +4178,14 @@ private:
   /// Set colon location.
   void setColonLoc(SourceLocation Loc) { ColonLoc = Loc; }
 
+  /// Set the user-defined mappers that are in the trailing objects of the
+  /// class.
+  void setUDMappers(ArrayRef<OMPDeclareMapperDecl *> DMDs) {
+    assert(DMDs.size() == varlist_size() &&
+           "Unexpected amount of user-defined mappers.");
+    std::copy(DMDs.begin(), DMDs.end(), getUDMappersRef().begin());
+  }
+
 public:
   /// Creates clause with a list of variables \a VL.
   ///
@@ -4186,6 +4195,8 @@ public:
   /// \param Vars The original expression used in the clause.
   /// \param Declarations Declarations used in the clause.
   /// \param ComponentLists Component lists used in the clause.
+  /// \param UDMappers User-defined mappers associated with expressions used in
+  /// the clause.
   /// \param MapModifiers Map-type-modifiers.
   /// \param MapModifiersLoc Location of map-type-modifiers.
   /// \param Type Map type.
@@ -4196,6 +4207,7 @@ public:
                               ArrayRef<Expr *> Vars,
                               ArrayRef<ValueDecl *> Declarations,
                               MappableExprComponentListsRef ComponentLists,
+                              ArrayRef<OMPDeclareMapperDecl *> UDMappers,
                               ArrayRef<OpenMPMapModifierKind> MapModifiers,
                               ArrayRef<SourceLocation> MapModifiersLoc,
                               OpenMPMapClauseKind Type, bool TypeIsImplicit,
@@ -4261,14 +4273,25 @@ public:
     return MapperIdentifier;
   }
 
-  /// Fetches the associated user-defined mapper.
-  OMPDeclareMapperDecl *getMapper() const LLVM_READONLY { return Mapper; }
-
   /// Fetches location of clause mapping kind.
   SourceLocation getMapLoc() const LLVM_READONLY { return MapLoc; }
 
   /// Get colon location.
   SourceLocation getColonLoc() const { return ColonLoc; }
+
+  /// Get the user-defined mappers that are in the trailing objects of the
+  /// class.
+  MutableArrayRef<OMPDeclareMapperDecl *> getUDMappersRef() {
+    return llvm::makeMutableArrayRef<OMPDeclareMapperDecl *>(
+        getTrailingObjects<OMPDeclareMapperDecl *>(), varlist_size());
+  }
+
+  /// Get the user-defined mappers that are in the trailing objects of the
+  /// class.
+  ArrayRef<OMPDeclareMapperDecl *> getUDMappersRef() const {
+    return llvm::makeArrayRef<OMPDeclareMapperDecl *>(
+        getTrailingObjects<OMPDeclareMapperDecl *>(), varlist_size());
+  }
 
   child_range children() {
     return child_range(

@@ -12906,6 +12906,8 @@ struct MappableVarListInfo {
   OMPClauseMappableExprCommon::MappableExprComponentLists VarComponents;
   // The base declaration of the variable.
   SmallVector<ValueDecl *, 16> VarBaseDeclarations;
+  // The user-defined mapper associated with every expression.
+  SmallVector<OMPDeclareMapperDecl *, 16> UDMapperList;
 
   MappableVarListInfo(ArrayRef<Expr *> VarList) : VarList(VarList) {
     // We have a list of components and base declarations for each entry in the
@@ -13114,7 +13116,7 @@ checkMappableExpressionList(Sema &SemaRef, DSAStackTy *DSAS,
   }
 }
 
-// Look up the user defined mapper given the mapper name and mapped type.
+// Look up the user-defined mapper given the mapper name and mapped type.
 OMPDeclareMapperDecl *lookupUserDefinedMapper(DeclarationName MapperIdentifier)
 {
   return nullptr;
@@ -13168,8 +13170,8 @@ Sema::ActOnOpenMPMapClause(ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
   // other diagnostics related with non-existing map clauses are accurate.
   return OMPMapClause::Create(Context, StartLoc, LParenLoc, EndLoc,
                               MVLI.ProcessedVarList, MVLI.VarBaseDeclarations,
-                              MVLI.VarComponents, Modifiers, ModifiersLoc,
-                              MapType, IsMapTypeImplicit, MapLoc);
+                              MVLI.VarComponents, MVLI.UDMapperList, Modifiers,
+                              ModifiersLoc, MapType, IsMapTypeImplicit, MapLoc);
 }
 
 QualType Sema::ActOnOpenMPDeclareReductionType(SourceLocation TyLoc,

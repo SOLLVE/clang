@@ -790,15 +790,17 @@ unsigned OMPClauseMappableExprCommon::getUniqueDeclarationsTotalNumber(
   return TotalNum;
 }
 
-OMPMapClause *
-OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
-                     SourceLocation LParenLoc, SourceLocation EndLoc,
-                     ArrayRef<Expr *> Vars, ArrayRef<ValueDecl *> Declarations,
-                     MappableExprComponentListsRef ComponentLists,
-                     ArrayRef<OpenMPMapModifierKind> MapModifiers,
-                     ArrayRef<SourceLocation> MapModifiersLoc,
-                     OpenMPMapClauseKind Type, bool TypeIsImplicit,
-                     SourceLocation TypeLoc) {
+OMPMapClause *OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
+                                   SourceLocation LParenLoc,
+                                   SourceLocation EndLoc, ArrayRef<Expr *> Vars,
+                                   ArrayRef<ValueDecl *> Declarations,
+                                   MappableExprComponentListsRef ComponentLists,
+                                   ArrayRef<OMPDeclareMapperDecl *> UDMappers,
+                                   ArrayRef<OpenMPMapModifierKind> MapModifiers,
+                                   ArrayRef<SourceLocation> MapModifiersLoc,
+                                   OpenMPMapClauseKind Type,
+                                   bool TypeIsImplicit,
+                                   SourceLocation TypeLoc) {
   unsigned NumVars = Vars.size();
   unsigned NumUniqueDeclarations =
       getUniqueDeclarationsTotalNumber(Declarations);
@@ -808,6 +810,8 @@ OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
   // We need to allocate:
   // NumVars x Expr* - we have an original list expression for each clause list
   // entry.
+  // NumVars x OMPDeclareMapperDecl* - the associated user-defined mapper for
+  // each clause list entry.
   // NumUniqueDeclarations x ValueDecl* - unique base declarations associated
   // with each component list.
   // (NumUniqueDeclarations + NumComponentLists) x unsigned - we specify the
@@ -816,9 +820,9 @@ OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
   // NumComponents x MappableComponent - the total of all the components in all
   // the lists.
   void *Mem = C.Allocate(
-      totalSizeToAlloc<Expr *, ValueDecl *, unsigned,
+      totalSizeToAlloc<Expr *, OMPDeclareMapperDecl *, ValueDecl *, unsigned,
                        OMPClauseMappableExprCommon::MappableComponent>(
-          NumVars, NumUniqueDeclarations,
+          NumVars, NumVars, NumUniqueDeclarations,
           NumUniqueDeclarations + NumComponentLists, NumComponents));
   OMPMapClause *Clause = new (Mem) OMPMapClause(
       MapModifiers, MapModifiersLoc, Type, TypeIsImplicit, TypeLoc, StartLoc,
@@ -826,6 +830,7 @@ OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
       NumComponents);
 
   Clause->setVarRefs(Vars);
+  Clause->setUDMappers(UDMappers);
   Clause->setClauseInfo(Declarations, ComponentLists);
   Clause->setMapType(Type);
   Clause->setMapLoc(TypeLoc);
@@ -837,9 +842,9 @@ OMPMapClause *OMPMapClause::CreateEmpty(const ASTContext &C, unsigned NumVars,
                                         unsigned NumComponentLists,
                                         unsigned NumComponents) {
   void *Mem = C.Allocate(
-      totalSizeToAlloc<Expr *, ValueDecl *, unsigned,
+      totalSizeToAlloc<Expr *, OMPDeclareMapperDecl *, ValueDecl *, unsigned,
                        OMPClauseMappableExprCommon::MappableComponent>(
-          NumVars, NumUniqueDeclarations,
+          NumVars, NumVars, NumUniqueDeclarations,
           NumUniqueDeclarations + NumComponentLists, NumComponents));
   return new (Mem) OMPMapClause(NumVars, NumUniqueDeclarations,
                                 NumComponentLists, NumComponents);
