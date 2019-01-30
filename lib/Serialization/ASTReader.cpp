@@ -12288,6 +12288,7 @@ void OMPClauseReader::VisitOMPMapClause(OMPMapClause *C) {
         I, static_cast<OpenMPMapModifierKind>(Record.readInt()));
     C->setMapTypeModifierLoc(I, Record.readSourceLocation());
   }
+  C->MapperIdentifier = Record.readDeclarationName();
   C->setMapType(
      static_cast<OpenMPMapClauseKind>(Record.readInt()));
   C->setMapLoc(Record.readSourceLocation());

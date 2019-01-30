@@ -6785,6 +6785,7 @@ void OMPClauseWriter::VisitOMPMapClause(OMPMapClause *C) {
     Record.push_back(C->getMapTypeModifier(I));
     Record.AddSourceLocation(C->getMapTypeModifierLoc(I));
   }
+  Record.AddDeclarationName(C->getMapperIdentifier());
   Record.push_back(C->getMapType());
   Record.AddSourceLocation(C->getMapLoc());
   Record.AddSourceLocation(C->getColonLoc());

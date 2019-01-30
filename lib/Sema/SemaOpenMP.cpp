@@ -13116,7 +13116,12 @@ checkMappableExpressionList(Sema &SemaRef, DSAStackTy *DSAS,
       }
 
       // Check the associated mapper.
-      OMPDeclareMapperDecl *DMD = lookupUserDefinedMapper(MapperId, Type);
+      OMPDeclareMapperDecl *DMD =
+          lookupUserDefinedMapper(MapperId, Type.getCanonicalType());
+      //if (!DMD && MapperId.getAsString() != "default") {
+      //  SemaRef.Diag(ELoc, diag::err_omp_invalid_mapper) << Type << MapperId;
+      //  continue;
+      //}
       MVLI.UDMapperList.push_back(DMD);
     } else {
       MVLI.UDMapperList.push_back(nullptr);
