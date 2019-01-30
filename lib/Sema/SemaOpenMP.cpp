@@ -12894,6 +12894,17 @@ static bool checkMapConflicts(
   return FoundError;
 }
 
+// Look up the user-defined mapper given the mapper name and mapped type.
+OMPDeclareMapperDecl *lookupUserDefinedMapper(DeclarationName MapperIdentifier,
+                                              QualType Type) {
+  Type.dump();
+  // [OpenMP 5.0], 2.19.7.3 declare mapper Directive, Restrictions
+  //  The type must be of struct, union or class type in C and C++
+  if (!Type->isStructureOrClassType() && !Type->isUnionType())
+    return nullptr;
+  return nullptr;
+}
+
 namespace {
 // Utility struct that gathers all the related lists associated with a mappable
 // expression.
@@ -12919,11 +12930,11 @@ struct MappableVarListInfo {
 }
 
 // Check the validity of the provided variable list for the provided clause kind
-// \a CKind. In the check process the valid expressions, and mappable expression
-// components and variables are extracted and used to fill \a ProcessedVarList,
-// \a VarComponents, \a VarBaseDeclarations, and \a UDMapperList in MVLI. \a
-// MapType, \a IsMapTypeImplicit, and \a MapperId are expected to be valid if
-// the clause kind is 'map'.
+// \a CKind. In the check process the valid expressions, mappable expression
+// components, variables, and user-defined mappers are extracted and used to
+// fill \a ProcessedVarList, \a VarComponents, \a VarBaseDeclarations, and \a
+// UDMapperList in MVLI. \a MapType, \a IsMapTypeImplicit, and \a MapperId are
+// expected to be valid if the clause kind is 'map'.
 static void
 checkMappableExpressionList(Sema &SemaRef, DSAStackTy *DSAS,
                             OpenMPClauseKind CKind, MappableVarListInfo &MVLI,
@@ -12934,6 +12945,10 @@ checkMappableExpressionList(Sema &SemaRef, DSAStackTy *DSAS,
   // We only expect mappable expressions in 'to', 'from', and 'map' clauses.
   assert((CKind == OMPC_map || CKind == OMPC_to || CKind == OMPC_from) &&
          "Unexpected clause kind with mappable expressions!");
+  assert(
+      ((CKind == OMPC_map && !MapperId.isEmpty()) ||
+       (CKind != OMPC_map && MapperId.isEmpty())) &&
+      "Map clauses and only map clauses have user-defined mapper identifiers.");
 
   // Keep track of the mappable components and base declarations in this clause.
   // Each entry in the list is going to have a list of components associated. We
@@ -12953,6 +12968,7 @@ checkMappableExpressionList(Sema &SemaRef, DSAStackTy *DSAS,
       // We can only analyze this information once the missing information is
       // resolved.
       MVLI.ProcessedVarList.push_back(RE);
+      MVLI.UDMapperList.push_back(nullptr);
       continue;
     }
 
@@ -12987,6 +13003,7 @@ checkMappableExpressionList(Sema &SemaRef, DSAStackTy *DSAS,
       MVLI.VarComponents.back().append(CurComponents.begin(),
                                        CurComponents.end());
       MVLI.VarBaseDeclarations.push_back(nullptr);
+      MVLI.UDMapperList.push_back(nullptr);
       continue;
     }
 
@@ -13097,6 +13114,12 @@ checkMappableExpressionList(Sema &SemaRef, DSAStackTy *DSAS,
           continue;
         }
       }
+
+      // Check the associated mapper.
+      OMPDeclareMapperDecl *DMD = lookupUserDefinedMapper(MapperId, Type);
+      MVLI.UDMapperList.push_back(DMD);
+    } else {
+      MVLI.UDMapperList.push_back(nullptr);
     }
 
     // Save the current expression.
@@ -13116,12 +13139,6 @@ checkMappableExpressionList(Sema &SemaRef, DSAStackTy *DSAS,
     MVLI.VarBaseDeclarations.push_back(isa<MemberExpr>(BE) ? nullptr
                                                            : CurDeclaration);
   }
-}
-
-// Look up the user-defined mapper given the mapper name and mapped type.
-OMPDeclareMapperDecl *lookupUserDefinedMapper(DeclarationName MapperIdentifier)
-{
-  return nullptr;
 }
 
 OMPClause *
