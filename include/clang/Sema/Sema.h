@@ -9306,8 +9306,9 @@ public:
       OpenMPLinearClauseKind LinKind,
       ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
       ArrayRef<SourceLocation> MapTypeModifiersLoc,
-      DeclarationName MapperIdentifier, OpenMPMapClauseKind MapType,
-      bool IsMapTypeImplicit, SourceLocation DepLinMapLoc);
+      CXXScopeSpec &MapperIdScopeSpec, DeclarationNameInfo &MapperId,
+      OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
+      SourceLocation DepLinMapLoc);
   /// Called on well-formed 'private' clause.
   OMPClause *ActOnOpenMPPrivateClause(ArrayRef<Expr *> VarList,
                                       SourceLocation StartLoc,
@@ -9388,14 +9389,13 @@ public:
                                      SourceLocation LParenLoc,
                                      SourceLocation EndLoc);
   /// Called on well-formed 'map' clause.
-  OMPClause *
-  ActOnOpenMPMapClause(ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
-                       ArrayRef<SourceLocation> MapTypeModifiersLoc,
-                       DeclarationName MapperIdentifier,
-                       OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
-                       SourceLocation MapLoc, SourceLocation ColonLoc,
-                       ArrayRef<Expr *> VarList, SourceLocation StartLoc,
-                       SourceLocation LParenLoc, SourceLocation EndLoc);
+  OMPClause *ActOnOpenMPMapClause(
+      ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
+      ArrayRef<SourceLocation> MapTypeModifiersLoc,
+      CXXScopeSpec &MapperIdScopeSpec, DeclarationNameInfo &MapperId,
+      OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
+      SourceLocation MapLoc, SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
+      SourceLocation StartLoc, SourceLocation LParenLoc, SourceLocation EndLoc);
   /// Called on well-formed 'num_teams' clause.
   OMPClause *ActOnOpenMPNumTeamsClause(Expr *NumTeams, SourceLocation StartLoc,
                                        SourceLocation LParenLoc,

@@ -6785,12 +6785,16 @@ void OMPClauseWriter::VisitOMPMapClause(OMPMapClause *C) {
     Record.push_back(C->getMapTypeModifier(I));
     Record.AddSourceLocation(C->getMapTypeModifierLoc(I));
   }
-  Record.AddDeclarationName(C->getMapperIdentifier());
+  Record.AddNestedNameSpecifierLoc(C->getMapperQualifierLoc());
+  Record.AddDeclarationNameInfo(C->getMapperIdInfo());
   Record.push_back(C->getMapType());
   Record.AddSourceLocation(C->getMapLoc());
   Record.AddSourceLocation(C->getColonLoc());
   for (auto *E : C->varlists())
     Record.AddStmt(E);
+  // FIXME
+  //for (const auto *D : C->mapperlists())
+  //  Record.AddDeclRef(D);
   for (auto *D : C->all_decls())
     Record.AddDeclRef(D);
   for (auto N : C->all_num_lists())

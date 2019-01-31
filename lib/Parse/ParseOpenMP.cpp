@@ -1958,54 +1958,65 @@ static OpenMPMapModifierKind isMapModifier(Parser &P) {
 /// Parse map-type-modifiers in map clause.
 /// map([ [map-type-modifier[,] [map-type-modifier[,] ...] map-type : ] list)
 /// where, map-type-modifier ::= always | close | mapper(mapper-identifier)
-static void parseMapTypeModifiers(Parser &P,
-                                  Parser::OpenMPVarListDataTy &Data) {
-  Preprocessor &PP = P.getPreprocessor();
-  while (P.getCurToken().isNot(tok::colon)) {
-    Token Tok = P.getCurToken();
-    OpenMPMapModifierKind TypeModifier = isMapModifier(P);
+void Parser::parseMapTypeModifiers(OpenMPVarListDataTy &Data) {
+  while (getCurToken().isNot(tok::colon)) {
+    OpenMPMapModifierKind TypeModifier = isMapModifier(*this);
     if (TypeModifier == OMPC_MAP_MODIFIER_always ||
         TypeModifier == OMPC_MAP_MODIFIER_close) {
       Data.MapTypeModifiers.push_back(TypeModifier);
       Data.MapTypeModifiersLoc.push_back(Tok.getLocation());
-      P.ConsumeToken();
+      ConsumeToken();
     } else if (TypeModifier == OMPC_MAP_MODIFIER_mapper) {
       Data.MapTypeModifiers.push_back(TypeModifier);
       Data.MapTypeModifiersLoc.push_back(Tok.getLocation());
-      P.ConsumeToken();
+      ConsumeToken();
       // Parse '('.
-      BalancedDelimiterTracker T(P, tok::l_paren, tok::annot_pragma_openmp_end);
+      BalancedDelimiterTracker T(*this, tok::l_paren,
+                                 tok::annot_pragma_openmp_end);
       if (T.expectAndConsume(diag::err_expected_lparen_after,
                              getOpenMPClauseName(OMPC_map))) {
-        P.SkipUntil(tok::comma, tok::r_paren, tok::annot_pragma_openmp_end,
-                  Parser::StopBeforeMatch);
+        SkipUntil(tok::comma, tok::r_paren, tok::annot_pragma_openmp_end,
+                  StopBeforeMatch);
         return;
       }
       // Parse mapper-identifier
-      auto &DeclNames = P.getActions().getASTContext().DeclarationNames;
-      Data.MapperIdentifier =
-          DeclNames.getIdentifier(P.getCurToken().getIdentifierInfo());
-      P.ConsumeToken();
-      // Parse ')'.
-      if (T.consumeClose())
+      UnqualifiedId UnqualifiedMapperId;
+      if (getLangOpts().CPlusPlus)
+        ParseOptionalCXXScopeSpecifier(Data.MapperIdScopeSpec,
+                                       /*ObjectType=*/nullptr,
+                                       /*EnteringContext=*/false);
+      bool InvalidMapperId = ParseUnqualifiedId(
+          Data.MapperIdScopeSpec, /*EnteringContext*/ false,
+          /*AllowDestructorName*/ false,
+          /*AllowConstructorName*/ false,
+          /*AllowDeductionGuide*/ false, nullptr, nullptr, UnqualifiedMapperId);
+      if (InvalidMapperId || Tok.isNot(tok::r_paren)) {
+        Diag(Tok, diag::err_omp_mapper_illegal_identifier);
+        SkipUntil(tok::colon, tok::r_paren, tok::annot_pragma_openmp_end,
+                  StopBeforeMatch);
         return;
+      } else {
+        Data.MapperId = Actions.GetNameFromUnqualifiedId(UnqualifiedMapperId);
+      }
+      // Parse ')'.
+      T.consumeClose();
     } else {
       // For the case of unknown map-type-modifier or a map-type.
       // Map-type is followed by a colon; the function returns when it
       // encounters a token followed by a colon.
       if (Tok.is(tok::comma)) {
-        P.Diag(Tok, diag::err_omp_map_type_modifier_missing);
-        P.ConsumeToken();
+        Diag(Tok, diag::err_omp_map_type_modifier_missing);
+        ConsumeToken();
         continue;
       }
       // Potential map-type token as it is followed by a colon.
       if (PP.LookAhead(0).is(tok::colon))
         return;
-      P.Diag(Tok, diag::err_omp_unknown_map_type_modifier);
-      P.ConsumeToken();
+      Diag(Tok, diag::err_omp_unknown_map_type_modifier);
+      ConsumeToken();
     }
-    if (P.getCurToken().is(tok::comma))
-      P.ConsumeToken();
+    if (getCurToken().is(tok::comma))
+      ConsumeToken();
   }
 }
 
@@ -2131,7 +2142,7 @@ bool Parser::ParseOpenMPVarList(OpenMPDirectiveKind DKind,
     // Only parse map-type-modifier[s] and map-type if a colon is present in
     // the map clause.
     if (ColonPresent) {
-      parseMapTypeModifiers(*this, Data);
+      parseMapTypeModifiers(Data);
       parseMapType(*this, Data);
     }
     if (Data.MapType == OMPC_MAP_unknown) {
@@ -2265,7 +2276,7 @@ OMPClause *Parser::ParseOpenMPVarListClause(OpenMPDirectiveKind DKind,
   return Actions.ActOnOpenMPVarListClause(
       Kind, Vars, Data.TailExpr, Loc, LOpen, Data.ColonLoc, Data.RLoc,
       Data.ReductionIdScopeSpec, Data.ReductionId, Data.DepKind, Data.LinKind,
-      Data.MapTypeModifiers, Data.MapTypeModifiersLoc, Data.MapperIdentifier,
-      Data.MapType, Data.IsMapTypeImplicit, Data.DepLinMapLoc);
+      Data.MapTypeModifiers, Data.MapTypeModifiersLoc, Data.MapperIdScopeSpec,
+      Data.MapperId, Data.MapType, Data.IsMapTypeImplicit, Data.DepLinMapLoc);
 }
 

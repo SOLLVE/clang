@@ -2892,7 +2892,8 @@ public:
     MapTypeModifiers;
     SmallVector<SourceLocation, OMPMapClause::NumberOfModifiers>
     MapTypeModifiersLoc;
-    DeclarationName MapperIdentifier;
+    CXXScopeSpec MapperIdScopeSpec;
+    DeclarationNameInfo MapperId;
     OpenMPMapClauseKind MapType = OMPC_MAP_unknown;
     bool IsMapTypeImplicit = false;
     SourceLocation DepLinMapLoc;
@@ -2909,6 +2910,10 @@ public:
                           ParsedType ObjectType,
                           SourceLocation *TemplateKWLoc,
                           UnqualifiedId &Result);
+  /// Parses map-type-modifiers in map clause.
+  /// map([ [map-type-modifier[,] [map-type-modifier[,] ...] map-type : ] list)
+  /// where, map-type-modifier ::= always | close | mapper(mapper-identifier)
+  void parseMapTypeModifiers(OpenMPVarListDataTy &Data);
 
 private:
   //===--------------------------------------------------------------------===//

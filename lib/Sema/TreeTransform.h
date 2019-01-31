@@ -1797,13 +1797,14 @@ public:
   OMPClause *
   RebuildOMPMapClause(ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
                       ArrayRef<SourceLocation> MapTypeModifiersLoc,
-                      DeclarationName MapperIdentifier,
-                      OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
-                      SourceLocation MapLoc, SourceLocation ColonLoc,
-                      ArrayRef<Expr *> VarList, SourceLocation StartLoc,
-                      SourceLocation LParenLoc, SourceLocation EndLoc) {
+                      CXXScopeSpec MapperIdScopeSpec,
+                      DeclarationNameInfo MapperId, OpenMPMapClauseKind MapType,
+                      bool IsMapTypeImplicit, SourceLocation MapLoc,
+                      SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
+                      SourceLocation StartLoc, SourceLocation LParenLoc,
+                      SourceLocation EndLoc) {
     return getSema().ActOnOpenMPMapClause(MapTypeModifiers, MapTypeModifiersLoc,
-                                          MapperIdentifier, MapType,
+                                          MapperIdScopeSpec, MapperId, MapType,
                                           IsMapTypeImplicit, MapLoc, ColonLoc,
                                           VarList, StartLoc, LParenLoc, EndLoc);
   }
@@ -8807,11 +8808,20 @@ OMPClause *TreeTransform<Derived>::TransformOMPMapClause(OMPMapClause *C) {
       return nullptr;
     Vars.push_back(EVar.get());
   }
+  CXXScopeSpec MapperIdScopeSpec;
+  // FIXME: adopt C->getQualifierLoc()?
+  MapperIdScopeSpec.Adopt(C->getMapperQualifierLoc());
+  DeclarationNameInfo MapperIdInfo = C->getMapperIdInfo();
+  if (MapperIdInfo.getName()) {
+    MapperIdInfo = getDerived().TransformDeclarationNameInfo(MapperIdInfo);
+    if (!MapperIdInfo.getName())
+      return nullptr;
+  }
   return getDerived().RebuildOMPMapClause(
-      C->getMapTypeModifiers(), C->getMapTypeModifiersLoc(),
-      C->getMapperIdentifier(), C->getMapType(), C->isImplicitMapType(),
-      C->getMapLoc(), C->getColonLoc(), Vars, C->getBeginLoc(),
-      C->getLParenLoc(), C->getEndLoc());
+      C->getMapTypeModifiers(), C->getMapTypeModifiersLoc(), MapperIdScopeSpec,
+      MapperIdInfo, C->getMapType(), C->isImplicitMapType(), C->getMapLoc(),
+      C->getColonLoc(), Vars, C->getBeginLoc(), C->getLParenLoc(),
+      C->getEndLoc());
 }
 
 template <typename Derived>

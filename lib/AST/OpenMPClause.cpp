@@ -798,7 +798,8 @@ OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
                      ArrayRef<OMPDeclareMapperDecl *> UDMappers,
                      ArrayRef<OpenMPMapModifierKind> MapModifiers,
                      ArrayRef<SourceLocation> MapModifiersLoc,
-                     DeclarationName MapperId, OpenMPMapClauseKind Type,
+                     NestedNameSpecifierLoc UDMQualifierLoc,
+                     DeclarationNameInfo MapperId, OpenMPMapClauseKind Type,
                      bool TypeIsImplicit, SourceLocation TypeLoc) {
   unsigned NumVars = Vars.size();
   unsigned NumUniqueDeclarations =
@@ -824,9 +825,9 @@ OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
           NumVars, NumVars, NumUniqueDeclarations,
           NumUniqueDeclarations + NumComponentLists, NumComponents));
   OMPMapClause *Clause = new (Mem) OMPMapClause(
-      MapModifiers, MapModifiersLoc, MapperId, Type, TypeIsImplicit, TypeLoc,
-      StartLoc, LParenLoc, EndLoc, NumVars, NumUniqueDeclarations,
-      NumComponentLists, NumComponents);
+      MapModifiers, MapModifiersLoc, UDMQualifierLoc, MapperId, Type,
+      TypeIsImplicit, TypeLoc, StartLoc, LParenLoc, EndLoc, NumVars,
+      NumUniqueDeclarations, NumComponentLists, NumComponents);
 
   Clause->setVarRefs(Vars);
   Clause->setUDMappers(UDMappers);
@@ -1435,6 +1436,14 @@ void OMPClausePrinter::VisitOMPMapClause(OMPMapClause *Node) {
         if (Node->getMapTypeModifier(I) != OMPC_MAP_MODIFIER_unknown) {
           OS << getOpenMPSimpleClauseTypeName(OMPC_map,
                                               Node->getMapTypeModifier(I));
+          if (Node->getMapTypeModifier(I) == OMPC_MAP_MODIFIER_mapper) {
+            OS << '(';
+            NestedNameSpecifier *MapperNNS =
+                Node->getMapperQualifierLoc().getNestedNameSpecifier();
+            if (MapperNNS != nullptr)
+              MapperNNS->print(OS, Policy);
+            OS << Node->getMapperIdInfo() << ')';
+          }
           OS << ',';
         }
       }
