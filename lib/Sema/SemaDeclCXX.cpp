@@ -1300,6 +1300,10 @@ static DeclAccessPair findDecomposableBaseClass(Sema &S, SourceLocation Loc,
 static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
                                      ValueDecl *Src, QualType DecompType,
                                      const CXXRecordDecl *OrigRD) {
+  if (S.RequireCompleteType(Src->getLocation(), DecompType,
+                            diag::err_incomplete_type))
+    return true;
+
   CXXCastPath BasePath;
   DeclAccessPair BasePair =
       findDecomposableBaseClass(S, Src->getLocation(), OrigRD, BasePath);
@@ -6552,7 +6556,7 @@ void Sema::CheckExplicitlyDefaultedSpecialMember(CXXMethodDecl *MD) {
     ReturnType = Type->getReturnType();
 
     QualType DeclType = Context.getTypeDeclType(RD);
-    DeclType = Context.getAddrSpaceQualType(DeclType, MD->getTypeQualifiers().getAddressSpace());
+    DeclType = Context.getAddrSpaceQualType(DeclType, MD->getMethodQualifiers().getAddressSpace());
     QualType ExpectedReturnType = Context.getLValueReferenceType(DeclType);
 
     if (!Context.hasSameType(ReturnType, ExpectedReturnType)) {
@@ -6562,7 +6566,7 @@ void Sema::CheckExplicitlyDefaultedSpecialMember(CXXMethodDecl *MD) {
     }
 
     // A defaulted special member cannot have cv-qualifiers.
-    if (Type->getTypeQuals().hasConst() || Type->getTypeQuals().hasVolatile()) {
+    if (Type->getMethodQuals().hasConst() || Type->getMethodQuals().hasVolatile()) {
       if (DeleteOnTypeMismatch)
         ShouldDeleteForTypeMismatch = true;
       else {
@@ -11809,13 +11813,12 @@ CXXMethodDecl *Sema::DeclareImplicitCopyAssignment(CXXRecordDecl *ClassDecl) {
     return nullptr;
 
   QualType ArgType = Context.getTypeDeclType(ClassDecl);
+  if (Context.getLangOpts().OpenCLCPlusPlus)
+    ArgType = Context.getAddrSpaceQualType(ArgType, LangAS::opencl_generic);
   QualType RetType = Context.getLValueReferenceType(ArgType);
   bool Const = ClassDecl->implicitCopyAssignmentHasConstParam();
   if (Const)
     ArgType = ArgType.withConst();
-
-  if (Context.getLangOpts().OpenCLCPlusPlus)
-    ArgType = Context.getAddrSpaceQualType(ArgType, LangAS::opencl_generic);
 
   ArgType = Context.getLValueReferenceType(ArgType);
 
@@ -12008,7 +12011,7 @@ void Sema::DefineImplicitCopyAssignment(SourceLocation CurrentLocation,
     DerefBuilder DerefThis(This);
     CastBuilder To(DerefThis,
                    Context.getQualifiedType(
-                       BaseType, CopyAssignOperator->getTypeQualifiers()),
+                       BaseType, CopyAssignOperator->getMethodQualifiers()),
                    VK_LValue, BasePath);
 
     // Build the copy.
@@ -12134,6 +12137,8 @@ CXXMethodDecl *Sema::DeclareImplicitMoveAssignment(CXXRecordDecl *ClassDecl) {
   // constructor rules.
 
   QualType ArgType = Context.getTypeDeclType(ClassDecl);
+  if (Context.getLangOpts().OpenCLCPlusPlus)
+    ArgType = Context.getAddrSpaceQualType(ArgType, LangAS::opencl_generic);
   QualType RetType = Context.getLValueReferenceType(ArgType);
   ArgType = Context.getRValueReferenceType(ArgType);
 
@@ -12373,7 +12378,7 @@ void Sema::DefineImplicitMoveAssignment(SourceLocation CurrentLocation,
     // Implicitly cast "this" to the appropriately-qualified base type.
     CastBuilder To(DerefThis,
                    Context.getQualifiedType(
-                       BaseType, MoveAssignOperator->getTypeQualifiers()),
+                       BaseType, MoveAssignOperator->getMethodQualifiers()),
                    VK_LValue, BasePath);
 
     // Build the move.
