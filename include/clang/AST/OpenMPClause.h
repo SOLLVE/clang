@@ -41,7 +41,6 @@
 namespace clang {
 
 class ASTContext;
-class OMPDeclareMapperDecl;
 
 //===----------------------------------------------------------------------===//
 // AST classes for clauses.
@@ -4040,11 +4039,10 @@ public:
 /// \endcode
 /// In this example directive '#pragma omp target' has clause 'map'
 /// with the variables 'a' and 'b'.
-class OMPMapClause final
-    : public OMPMappableExprListClause<OMPMapClause>,
-      private llvm::TrailingObjects<
-          OMPMapClause, Expr *, OMPDeclareMapperDecl *, ValueDecl *, unsigned,
-          OMPClauseMappableExprCommon::MappableComponent> {
+class OMPMapClause final : public OMPMappableExprListClause<OMPMapClause>,
+                           private llvm::TrailingObjects<
+                               OMPMapClause, Expr *, ValueDecl *, unsigned,
+                               OMPClauseMappableExprCommon::MappableComponent> {
   friend class OMPClauseReader;
   friend OMPMappableExprListClause;
   friend OMPVarListClause;
@@ -4053,10 +4051,7 @@ class OMPMapClause final
   /// Define the sizes of each trailing object array except the last one. This
   /// is required for TrailingObjects to work properly.
   size_t numTrailingObjects(OverloadToken<Expr *>) const {
-    return varlist_size();
-  }
-  size_t numTrailingObjects(OverloadToken<OMPDeclareMapperDecl *>) const {
-    return varlist_size();
+    return 2 * varlist_size();
   }
   size_t numTrailingObjects(OverloadToken<ValueDecl *>) const {
     return getUniqueDeclarationsNum();
@@ -4196,26 +4191,26 @@ private:
     MapperIdInfo = MapperId;
   }
 
-  /// Get the user-defined mappers that are in the trailing objects of the
-  /// class.
-  MutableArrayRef<OMPDeclareMapperDecl *> getUDMappersRef() {
-    return llvm::makeMutableArrayRef<OMPDeclareMapperDecl *>(
-        getTrailingObjects<OMPDeclareMapperDecl *>(), varlist_size());
+  /// Get the user-defined mapper references that are in the trailing objects of
+  /// the class.
+  MutableArrayRef<Expr *> getUDMapperRefs() {
+    return llvm::makeMutableArrayRef<Expr *>(
+        getTrailingObjects<Expr *>() + varlist_size(), varlist_size());
   }
 
-  /// Get the user-defined mappers that are in the trailing objects of the
-  /// class.
-  ArrayRef<OMPDeclareMapperDecl *> getUDMappersRef() const {
-    return llvm::makeArrayRef<OMPDeclareMapperDecl *>(
-        getTrailingObjects<OMPDeclareMapperDecl *>(), varlist_size());
+  /// Get the user-defined mappers references that are in the trailing objects
+  /// of the class.
+  ArrayRef<Expr *> getUDMapperRefs() const {
+    return llvm::makeArrayRef<Expr *>(
+        getTrailingObjects<Expr *>() + varlist_size(), varlist_size());
   }
 
   /// Set the user-defined mappers that are in the trailing objects of the
   /// class.
-  void setUDMappers(ArrayRef<OMPDeclareMapperDecl *> DMDs) {
+  void setUDMapperRefs(ArrayRef<Expr *> DMDs) {
     assert(DMDs.size() == varlist_size() &&
            "Unexpected amount of user-defined mappers.");
-    std::copy(DMDs.begin(), DMDs.end(), getUDMappersRef().begin());
+    std::copy(DMDs.begin(), DMDs.end(), getUDMapperRefs().begin());
   }
 
 public:
@@ -4227,8 +4222,8 @@ public:
   /// \param Vars The original expression used in the clause.
   /// \param Declarations Declarations used in the clause.
   /// \param ComponentLists Component lists used in the clause.
-  /// \param UDMappers User-defined mappers associated with expressions used in
-  /// the clause.
+  /// \param UDMapperRefs References to user-defined mappers associated with
+  /// expressions used in the clause.
   /// \param MapModifiers Map-type-modifiers.
   /// \param MapModifiersLoc Location of map-type-modifiers.
   /// \param UDMQualifierLoc C++ nested name specifier for the assoicated
@@ -4237,18 +4232,16 @@ public:
   /// \param Type Map type.
   /// \param TypeIsImplicit Map type is inferred implicitly.
   /// \param TypeLoc Location of the map type.
-  static OMPMapClause *Create(const ASTContext &C, SourceLocation StartLoc,
-                              SourceLocation LParenLoc, SourceLocation EndLoc,
-                              ArrayRef<Expr *> Vars,
-                              ArrayRef<ValueDecl *> Declarations,
-                              MappableExprComponentListsRef ComponentLists,
-                              ArrayRef<OMPDeclareMapperDecl *> UDMappers,
-                              ArrayRef<OpenMPMapModifierKind> MapModifiers,
-                              ArrayRef<SourceLocation> MapModifiersLoc,
-                              NestedNameSpecifierLoc UDMQualifierLoc,
-                              DeclarationNameInfo MapperId,
-                              OpenMPMapClauseKind Type, bool TypeIsImplicit,
-                              SourceLocation TypeLoc);
+  static OMPMapClause *
+  Create(const ASTContext &C, SourceLocation StartLoc, SourceLocation LParenLoc,
+         SourceLocation EndLoc, ArrayRef<Expr *> Vars,
+         ArrayRef<ValueDecl *> Declarations,
+         MappableExprComponentListsRef ComponentLists,
+         ArrayRef<Expr *> UDMapperRefs,
+         ArrayRef<OpenMPMapModifierKind> MapModifiers,
+         ArrayRef<SourceLocation> MapModifiersLoc,
+         NestedNameSpecifierLoc UDMQualifierLoc, DeclarationNameInfo MapperId,
+         OpenMPMapClauseKind Type, bool TypeIsImplicit, SourceLocation TypeLoc);
 
   /// Creates an empty clause with the place for \a NumVars original
   /// expressions, \a NumUniqueDeclarations declarations, \NumComponentLists
@@ -4319,20 +4312,19 @@ public:
   /// Get colon location.
   SourceLocation getColonLoc() const { return ColonLoc; }
 
-  using mapperlist_iterator = MutableArrayRef<OMPDeclareMapperDecl *>::iterator;
-  using mapperlist_const_iterator =
-      ArrayRef<const OMPDeclareMapperDecl *>::iterator;
+  using mapperlist_iterator = MutableArrayRef<Expr *>::iterator;
+  using mapperlist_const_iterator = ArrayRef<const Expr *>::iterator;
   using mapperlist_range = llvm::iterator_range<mapperlist_iterator>;
   using mapperlist_const_range =
       llvm::iterator_range<mapperlist_const_iterator>;
 
-  mapperlist_iterator mapperlist_begin() { return getUDMappersRef().begin(); }
-  mapperlist_iterator mapperlist_end() { return getUDMappersRef().end(); }
+  mapperlist_iterator mapperlist_begin() { return getUDMapperRefs().begin(); }
+  mapperlist_iterator mapperlist_end() { return getUDMapperRefs().end(); }
   mapperlist_const_iterator mapperlist_begin() const {
-    return getUDMappersRef().begin();
+    return getUDMapperRefs().begin();
   }
   mapperlist_const_iterator mapperlist_end() const {
-    return getUDMappersRef().end();
+    return getUDMapperRefs().end();
   }
   mapperlist_range mapperlists() {
     return mapperlist_range(mapperlist_begin(), mapperlist_end());

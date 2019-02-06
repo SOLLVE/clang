@@ -8810,9 +8810,12 @@ OMPClause *TreeTransform<Derived>::TransformOMPMapClause(OMPMapClause *C) {
       return nullptr;
     Vars.push_back(EVar.get());
   }
+  NestedNameSpecifierLoc QualifierLoc =
+      getDerived().TransformNestedNameSpecifierLoc(C->getMapperQualifierLoc());
+  if (!QualifierLoc)
+    return nullptr;
   CXXScopeSpec MapperIdScopeSpec;
-  // FIXME: adopt C->getQualifierLoc()?
-  MapperIdScopeSpec.Adopt(C->getMapperQualifierLoc());
+  MapperIdScopeSpec.Adopt(QualifierLoc);
   DeclarationNameInfo MapperIdInfo = C->getMapperIdInfo();
   if (MapperIdInfo.getName()) {
     MapperIdInfo = getDerived().TransformDeclarationNameInfo(MapperIdInfo);
