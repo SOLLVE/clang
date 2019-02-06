@@ -134,7 +134,7 @@ private:
     /// get the data (loop counters etc.) about enclosing loop-based construct.
     /// This data is required during codegen.
     DoacrossDependMapTy DoacrossDepends;
-    /// first argument (Expr *) contains optional argument of the
+    /// First argument (Expr *) contains optional argument of the
     /// 'ordered' clause, the second one is true if the regions has 'ordered'
     /// clause, false otherwise.
     llvm::Optional<std::pair<const Expr *, OMPOrderedClause *>> OrderedRegion;
@@ -5973,13 +5973,6 @@ StmtResult Sema::ActOnOpenMPSectionsDirective(ArrayRef<OMPClause *> Clauses,
     return StmtError();
   }
 
-  // 1.2.2 OpenMP Language Terminology
-  // Structured block - An executable statement with a single entry at the
-  // top and a single exit at the bottom.
-  // The point of exit cannot be a branch out of the structured block.
-  // longjmp() and throw() must not violate the entry/exit criteria.
-  cast<CapturedStmt>(AStmt)->getCapturedDecl()->setNothrow();
-
   setFunctionHasBranchProtectedScope();
 
   return OMPSectionsDirective::Create(Context, StartLoc, EndLoc, Clauses, AStmt,
@@ -5993,13 +5986,6 @@ StmtResult Sema::ActOnOpenMPSectionDirective(Stmt *AStmt,
     return StmtError();
 
   assert(isa<CapturedStmt>(AStmt) && "Captured statement expected");
-
-  // 1.2.2 OpenMP Language Terminology
-  // Structured block - An executable statement with a single entry at the
-  // top and a single exit at the bottom.
-  // The point of exit cannot be a branch out of the structured block.
-  // longjmp() and throw() must not violate the entry/exit criteria.
-  cast<CapturedStmt>(AStmt)->getCapturedDecl()->setNothrow();
 
   setFunctionHasBranchProtectedScope();
   DSAStack->setParentCancelRegion(DSAStack->isCancelRegion());
@@ -7083,7 +7069,9 @@ StmtResult Sema::ActOnOpenMPTargetDirective(ArrayRef<OMPClause *> Clauses,
       auto I = CS->body_begin();
       while (I != CS->body_end()) {
         const auto *OED = dyn_cast<OMPExecutableDirective>(*I);
-        if (!OED || !isOpenMPTeamsDirective(OED->getDirectiveKind())) {
+        if (!OED || !isOpenMPTeamsDirective(OED->getDirectiveKind()) ||
+            OMPTeamsFound) {
+
           OMPTeamsFound = false;
           break;
         }
@@ -10765,7 +10753,8 @@ buildDeclareReductionRef(Sema &SemaRef, SourceLocation Loc, SourceRange Range,
               return D;
             return nullptr;
           }))
-    return SemaRef.BuildDeclRefExpr(VD, Ty, VK_LValue, Loc);
+    return SemaRef.BuildDeclRefExpr(VD, VD->getType().getNonReferenceType(),
+                                    VK_LValue, Loc);
   if (auto *VD = filterLookupForUDR<ValueDecl *>(
           Lookups, [&SemaRef, Ty, Loc](ValueDecl *D) -> ValueDecl * {
             if (!D->isInvalidDecl() &&
@@ -10783,7 +10772,8 @@ buildDeclareReductionRef(Sema &SemaRef, SourceLocation Loc, SourceRange Range,
                                          /*DiagID=*/0) !=
             Sema::AR_inaccessible) {
           SemaRef.BuildBasePathArray(Paths, BasePath);
-          return SemaRef.BuildDeclRefExpr(VD, Ty, VK_LValue, Loc);
+          return SemaRef.BuildDeclRefExpr(
+              VD, VD->getType().getNonReferenceType(), VK_LValue, Loc);
         }
       }
     }
