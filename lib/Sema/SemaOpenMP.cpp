@@ -12952,7 +12952,7 @@ static bool checkMapConflicts(
   return FoundError;
 }
 
-#include <iostream>
+//#include <iostream>
 // Look up the user-defined mapper given the mapper name and mapped type, and
 // build a reference to it.
 ExprResult buildUserDefinedMapperRef(Sema &SemaRef, Scope *S,
@@ -12964,21 +12964,18 @@ ExprResult buildUserDefinedMapperRef(Sema &SemaRef, Scope *S,
   if (!Type->isStructureOrClassType() && !Type->isUnionType())
     return ExprEmpty();
 
-  Type.dump();
-  assert(S);
-  SmallVector<UnresolvedSet<8>, 4> Lookups;
   // Find all user-defined mappers with the given MapperId.
+  SmallVector<UnresolvedSet<8>, 4> Lookups;
   LookupResult Lookup(SemaRef, MapperId, Sema::LookupOMPMapperName);
   Lookup.suppressDiagnostics();
-  std::cerr << "LOOK\n";
   while (S && SemaRef.LookupParsedName(Lookup, S, &MapperIdScopeSpec)) {
-    std::cerr << "L\n";
-    S->dump();
-    for (auto D : S->decls())
-      D->dump();
-    std::cerr << "K\n";
-    for (auto D : Lookup)
-      D->dump();
+    //std::cerr << "L\n";
+    //S->dump();
+    //for (auto D : S->decls())
+    //  D->dump();
+    //std::cerr << "K\n";
+    //for (auto D : Lookup)
+    //  D->dump();
     NamedDecl *D = Lookup.getRepresentativeDecl();
     while (S && !S->isDeclScope(D))
       S = S->getParent();
@@ -12987,7 +12984,7 @@ ExprResult buildUserDefinedMapperRef(Sema &SemaRef, Scope *S,
     Lookups.emplace_back();
     Lookups.back().append(Lookup.begin(), Lookup.end());
     Lookup.clear();
-    std::cerr << "LOOK\n";
+    //std::cerr << "LOOK\n";
   }
   // Defer the lookup for dependent types.
   if (SemaRef.CurContext->isDependentContext() || Type->isDependentType() ||
@@ -13264,10 +13261,9 @@ static void checkMappableExpressionList(
       ExprResult ER = buildUserDefinedMapperRef(SemaRef, DSAS->getCurScope(),
                                                 *MapperIdScopeSpec, *MapperId,
                                                 Type.getCanonicalType());
-      if (ER.isUsable()) {
-        ER.get()->dump();
+      if (ER.isUsable())
         MVLI.UDMapperList.push_back(ER.get());
-      } else {
+      else {
         if (MapperIdScopeSpec->isSet() ||
             MapperId->getAsString() != "default") {
           SemaRef.Diag(MapperId->getLoc(), diag::err_omp_invalid_mapper)

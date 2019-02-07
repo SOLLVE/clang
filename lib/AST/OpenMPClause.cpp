@@ -1437,7 +1437,7 @@ void OMPClausePrinter::VisitOMPMapClause(OMPMapClause *Node) {
             OS << '(';
             NestedNameSpecifier *MapperNNS =
                 Node->getMapperQualifierLoc().getNestedNameSpecifier();
-            if (MapperNNS != nullptr)
+            if (MapperNNS)
               MapperNNS->print(OS, Policy);
             OS << Node->getMapperIdInfo() << ')';
           }
