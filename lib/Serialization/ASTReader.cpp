@@ -12307,12 +12307,11 @@ void OMPClauseReader::VisitOMPMapClause(OMPMapClause *C) {
     Vars.push_back(Record.readExpr());
   C->setVarRefs(Vars);
 
-  // FIXME
-  //SmallVector<OMPDeclareMapperDecl *, 16> UDMappers;
-  //UDMappers.reserve(NumVars);
-  //for (unsigned i = 0; i < NumVars; ++i)
-  //  UDMappers.push_back(Record.readDeclAs<OMPDeclareMapperDecl>());
-  //C->setUDMappers(UDMappers);
+  SmallVector<Expr *, 16> UDMappers;
+  UDMappers.reserve(NumVars);
+  for (unsigned i = 0; i < NumVars; ++i)
+    UDMappers.push_back(Record.readExpr());
+  C->setUDMapperRefs(UDMappers);
 
   SmallVector<ValueDecl *, 16> Decls;
   Decls.reserve(UniqueDecls);

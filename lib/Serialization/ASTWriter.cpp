@@ -6792,9 +6792,8 @@ void OMPClauseWriter::VisitOMPMapClause(OMPMapClause *C) {
   Record.AddSourceLocation(C->getColonLoc());
   for (auto *E : C->varlists())
     Record.AddStmt(E);
-  // FIXME
-  //for (const auto *D : C->mapperlists())
-  //  Record.AddDeclRef(D);
+  for (auto *E : C->mapperlists())
+    Record.AddStmt(E);
   for (auto *D : C->all_decls())
     Record.AddDeclRef(D);
   for (auto N : C->all_num_lists())

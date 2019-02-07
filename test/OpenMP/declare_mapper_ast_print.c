@@ -40,6 +40,10 @@ int main() {
   {
 #pragma omp declare mapper(id: struct vec v) map(v.len)
 // CHECK: #pragma omp declare mapper (id : struct vec v) map(tofrom: v.len)
+    struct vec vv;
+    struct dat dd[10];
+//#pragma omp target map(mapper(id) alloc: vv)
+//#pragma omp target map(mapper(default): dd[0:10])
   }
   return 0;
 }
