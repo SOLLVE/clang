@@ -1779,6 +1779,14 @@ bool Sema::LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation) {
         else if (NameKind == LookupObjCImplicitSelfParam &&
                  !isa<ImplicitParamDecl>(*I))
           continue;
+        else if (NameKind == LookupOMPMapperName) {
+          // Skip out-of-scope declarations.
+          Scope *CurS = S;
+          while (CurS && !CurS->isDeclScope(D))
+            CurS = CurS->getParent();
+          if (!CurS)
+            continue;
+        }
 
         R.addDecl(D);
 

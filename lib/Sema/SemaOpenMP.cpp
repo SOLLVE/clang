@@ -12970,6 +12970,7 @@ ExprResult buildUserDefinedMapperRef(Sema &SemaRef, Scope *S,
   // Find all user-defined mappers with the given MapperId.
   LookupResult Lookup(SemaRef, MapperId, Sema::LookupOMPMapperName);
   Lookup.suppressDiagnostics();
+  std::cerr << "LOOK\n";
   while (S && SemaRef.LookupParsedName(Lookup, S, &MapperIdScopeSpec)) {
     std::cerr << "L\n";
     S->dump();
@@ -12986,6 +12987,7 @@ ExprResult buildUserDefinedMapperRef(Sema &SemaRef, Scope *S,
     Lookups.emplace_back();
     Lookups.back().append(Lookup.begin(), Lookup.end());
     Lookup.clear();
+    std::cerr << "LOOK\n";
   }
   // Defer the lookup for dependent types.
   if (SemaRef.CurContext->isDependentContext() || Type->isDependentType() ||
