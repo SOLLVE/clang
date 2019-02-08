@@ -13317,10 +13317,6 @@ OMPClause *Sema::ActOnOpenMPMapClause(
     }
     assert(Count < OMPMapClause::NumberOfModifiers &&
            "Modifiers exceed the allowed number of map type modifiers");
-    assert(
-        (MapTypeModifiers[I] != OMPC_MAP_MODIFIER_mapper ||
-         !MapperId.getName().isEmpty()) &&
-        "Mapper identifier must be explicitly specified with mapper modifier");
     Modifiers[Count] = MapTypeModifiers[I];
     ModifiersLoc[Count] = MapTypeModifiersLoc[I];
     ++Count;
