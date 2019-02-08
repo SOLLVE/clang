@@ -2920,7 +2920,7 @@ public:
   /// Parses map-type-modifiers in map clause.
   /// map([ [map-type-modifier[,] [map-type-modifier[,] ...] map-type : ] list)
   /// where, map-type-modifier ::= always | close | mapper(mapper-identifier)
-  void parseMapTypeModifiers(OpenMPVarListDataTy &Data);
+  bool parseMapTypeModifiers(OpenMPVarListDataTy &Data);
 
 private:
   //===--------------------------------------------------------------------===//
