@@ -64,6 +64,9 @@ T foo(T a) {
   {
 #pragma omp declare mapper(id: N1::vec v) map(v.len)
   }
+  struct foodat fd;
+#pragma omp target map(mapper(default) alloc: fd)
+  { fd.a++; }
   return 0;
 }
 
@@ -73,6 +76,7 @@ T foo(T a) {
 // CHECK: {
 // CHECK: #pragma omp declare mapper (id : N1::vec v) map(tofrom: v.len)
 // CHECK: }
+// CHECK: #pragma omp target map(mapper(default),alloc: fd)
 // CHECK: }
 // CHECK: template<> int foo<int>(int a) {
 // CHECK: #pragma omp declare mapper (default : struct foodat v) map(tofrom: v.a)
@@ -80,10 +84,19 @@ T foo(T a) {
 // CHECK: {
 // CHECK: #pragma omp declare mapper (id : N1::vec v) map(tofrom: v.len)
 // CHECK: }
+// CHECK: #pragma omp target map(mapper(default),alloc: fd)
 // CHECK: }
 
 // CHECK: int main() {
 int main() {
+  N1::vec vv, vvv;
+  dat<double> dd;
+#pragma omp target map(mapper(N1::id) tofrom: vv) map(mapper(dat<double>::id) alloc: vvv)
+// CHECK: #pragma omp target map(mapper(N1::id),tofrom: vv) map(mapper(dat<double>::id),alloc: vvv)
+  { vv.len++; }
+#pragma omp target map(mapper(default) tofrom: dd)
+// CHECK: #pragma omp target map(mapper(default),tofrom: dd)
+  { dd.d++; }
 #pragma omp declare mapper(id: N1::vec v) map(v.len)
 // CHECK: #pragma omp declare mapper (id : N1::vec v) map(tofrom: v.len)
   {
