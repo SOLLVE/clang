@@ -8825,8 +8825,8 @@ OMPClause *TreeTransform<Derived>::TransformOMPMapClause(OMPMapClause *C) {
     if (!MapperIdInfo.getName())
       return nullptr;
   }
-  // Build a list of all OMPDeclareMapperDecls with the same names ranged by the
-  // Scopes.
+  // Build a list of all candidate OMPDeclareMapperDecls, which is provided by
+  // the previous user-defined mapper lookup in dependent environment.
   llvm::SmallVector<Expr *, 16> UnresolvedMappers;
   for (auto *E : C->mapperlists()) {
     // Transform all the decls.
@@ -8841,7 +8841,7 @@ OMPClause *TreeTransform<Derived>::TransformOMPMapClause(OMPMapClause *C) {
       UnresolvedMappers.push_back(UnresolvedLookupExpr::Create(
           SemaRef.Context, /*NamingClass=*/nullptr,
           MapperIdScopeSpec.getWithLocInContext(SemaRef.Context), MapperIdInfo,
-          /*ADL=*/true, ULE->isOverloaded(), Decls.begin(), Decls.end()));
+          /*ADL=*/false, ULE->isOverloaded(), Decls.begin(), Decls.end()));
     } else
       UnresolvedMappers.push_back(nullptr);
   }
