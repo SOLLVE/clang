@@ -13002,7 +13002,6 @@ static bool checkMapConflicts(
   return FoundError;
 }
 
-#include <iostream>
 // Look up the user-defined mapper given the mapper name and mapped type, and
 // build a reference to it.
 ExprResult buildUserDefinedMapperRef(Sema &SemaRef, Scope *S,
@@ -13166,7 +13165,6 @@ static void checkMappableExpressionList(
     // Find the current unresolved mapper expression.
     if (UpdateUMIt && UMIt != UMEnd) {
       UMIt++;
-      std::cerr << "Not empty.\n";
       assert(
           UMIt != UMEnd &&
           "Expect the size of UnresolvedMappers to match with that of VarList");
