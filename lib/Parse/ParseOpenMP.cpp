@@ -1983,22 +1983,6 @@ bool Parser::parseMapTypeModifiers(OpenMPVarListDataTy &Data) {
         ParseOptionalCXXScopeSpecifier(Data.MapperIdScopeSpec,
                                        /*ObjectType=*/nullptr,
                                        /*EnteringContext=*/false);
-      //UnqualifiedId UnqualifiedMapperId;
-      //bool InvalidMapperId = ParseUnqualifiedId(
-      //    Data.MapperIdScopeSpec, /*EnteringContext*/ false,
-      //    /*AllowDestructorName*/ false,
-      //    /*AllowConstructorName*/ false,
-      //    /*AllowDeductionGuide*/ false, nullptr, nullptr, UnqualifiedMapperId);
-      //if (InvalidMapperId || Tok.isNot(tok::r_paren)) {
-      //  Diag(Tok, diag::err_omp_mapper_illegal_identifier);
-      //  SkipUntil(tok::colon, tok::r_paren, tok::annot_pragma_openmp_end,
-      //            StopBeforeMatch);
-      //  if (Tok.is(tok::r_paren))
-      //    T.consumeClose();
-      //  return;
-      //} else {
-      //  Data.MapperId = Actions.GetNameFromUnqualifiedId(UnqualifiedMapperId);
-      //}
       if (Tok.isNot(tok::identifier) && Tok.isNot(tok::kw_default)) {
         Diag(Tok.getLocation(), diag::err_omp_mapper_illegal_identifier);
         SkipUntil(tok::colon, tok::annot_pragma_openmp_end, StopBeforeMatch);

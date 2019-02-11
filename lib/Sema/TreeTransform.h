@@ -13,6 +13,7 @@
 #ifndef LLVM_CLANG_LIB_SEMA_TREETRANSFORM_H
 #define LLVM_CLANG_LIB_SEMA_TREETRANSFORM_H
 
+#include <iostream>
 #include "CoroutineStmtBuilder.h"
 #include "TypeLocBuilder.h"
 #include "clang/AST/Decl.h"
@@ -1795,19 +1796,18 @@ public:
   ///
   /// By default, performs semantic analysis to build the new OpenMP clause.
   /// Subclasses may override this routine to provide different behavior.
-  OMPClause *
-  RebuildOMPMapClause(ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
-                      ArrayRef<SourceLocation> MapTypeModifiersLoc,
-                      CXXScopeSpec MapperIdScopeSpec,
-                      DeclarationNameInfo MapperId, OpenMPMapClauseKind MapType,
-                      bool IsMapTypeImplicit, SourceLocation MapLoc,
-                      SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
-                      SourceLocation StartLoc, SourceLocation LParenLoc,
-                      SourceLocation EndLoc) {
-    return getSema().ActOnOpenMPMapClause(MapTypeModifiers, MapTypeModifiersLoc,
-                                          MapperIdScopeSpec, MapperId, MapType,
-                                          IsMapTypeImplicit, MapLoc, ColonLoc,
-                                          VarList, StartLoc, LParenLoc, EndLoc);
+  OMPClause *RebuildOMPMapClause(
+      ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
+      ArrayRef<SourceLocation> MapTypeModifiersLoc,
+      CXXScopeSpec MapperIdScopeSpec, DeclarationNameInfo MapperId,
+      OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
+      SourceLocation MapLoc, SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
+      SourceLocation StartLoc, SourceLocation LParenLoc, SourceLocation EndLoc,
+      ArrayRef<Expr *> UnresolvedMappers) {
+    return getSema().ActOnOpenMPMapClause(
+        MapTypeModifiers, MapTypeModifiersLoc, MapperIdScopeSpec, MapperId,
+        MapType, IsMapTypeImplicit, MapLoc, ColonLoc, VarList, StartLoc,
+        LParenLoc, EndLoc, UnresolvedMappers);
   }
 
   /// Build a new OpenMP 'num_teams' clause.
@@ -8825,11 +8825,31 @@ OMPClause *TreeTransform<Derived>::TransformOMPMapClause(OMPMapClause *C) {
     if (!MapperIdInfo.getName())
       return nullptr;
   }
+  // Build a list of all OMPDeclareMapperDecls with the same names ranged by the
+  // Scopes.
+  llvm::SmallVector<Expr *, 16> UnresolvedMappers;
+  for (auto *E : C->mapperlists()) {
+    // Transform all the decls.
+    if (E) {
+      auto *ULE = cast<UnresolvedLookupExpr>(E);
+      UnresolvedSet<8> Decls;
+      for (auto *D : ULE->decls()) {
+        NamedDecl *InstD =
+            cast<NamedDecl>(getDerived().TransformDecl(E->getExprLoc(), D));
+        Decls.addDecl(InstD, InstD->getAccess());
+      }
+      UnresolvedMappers.push_back(UnresolvedLookupExpr::Create(
+          SemaRef.Context, /*NamingClass=*/nullptr,
+          MapperIdScopeSpec.getWithLocInContext(SemaRef.Context), MapperIdInfo,
+          /*ADL=*/true, ULE->isOverloaded(), Decls.begin(), Decls.end()));
+    } else
+      UnresolvedMappers.push_back(nullptr);
+  }
   return getDerived().RebuildOMPMapClause(
       C->getMapTypeModifiers(), C->getMapTypeModifiersLoc(), MapperIdScopeSpec,
       MapperIdInfo, C->getMapType(), C->isImplicitMapType(), C->getMapLoc(),
       C->getColonLoc(), Vars, C->getBeginLoc(), C->getLParenLoc(),
-      C->getEndLoc());
+      C->getEndLoc(), UnresolvedMappers);
 }
 
 template <typename Derived>

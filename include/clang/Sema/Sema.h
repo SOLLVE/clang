@@ -9430,7 +9430,8 @@ public:
       CXXScopeSpec &MapperIdScopeSpec, DeclarationNameInfo &MapperId,
       OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
       SourceLocation MapLoc, SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
-      SourceLocation StartLoc, SourceLocation LParenLoc, SourceLocation EndLoc);
+      SourceLocation StartLoc, SourceLocation LParenLoc, SourceLocation EndLoc,
+      ArrayRef<Expr *> UnresolvedMappers = llvm::None);
   /// Called on well-formed 'num_teams' clause.
   OMPClause *ActOnOpenMPNumTeamsClause(Expr *NumTeams, SourceLocation StartLoc,
                                        SourceLocation LParenLoc,
