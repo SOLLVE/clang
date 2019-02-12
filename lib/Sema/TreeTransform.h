@@ -8841,8 +8841,9 @@ OMPClause *TreeTransform<Derived>::TransformOMPMapClause(OMPMapClause *C) {
           SemaRef.Context, /*NamingClass=*/nullptr,
           MapperIdScopeSpec.getWithLocInContext(SemaRef.Context), MapperIdInfo,
           /*ADL=*/false, ULE->isOverloaded(), Decls.begin(), Decls.end()));
-    } else
+    } else {
       UnresolvedMappers.push_back(nullptr);
+    }
   }
   return getDerived().RebuildOMPMapClause(
       C->getMapTypeModifiers(), C->getMapTypeModifiersLoc(), MapperIdScopeSpec,

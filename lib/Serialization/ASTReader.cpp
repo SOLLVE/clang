@@ -12309,7 +12309,7 @@ void OMPClauseReader::VisitOMPMapClause(OMPMapClause *C) {
 
   SmallVector<Expr *, 16> UDMappers;
   UDMappers.reserve(NumVars);
-  for (unsigned i = 0; i < NumVars; ++i)
+  for (unsigned I = 0; I < NumVars; ++I)
     UDMappers.push_back(Record.readExpr());
   C->setUDMapperRefs(UDMappers);
 

@@ -13183,13 +13183,9 @@ static void checkMappableExpressionList(
         ExprResult ER = buildUserDefinedMapperRef(
             SemaRef, DSAS->getCurScope(), *MapperIdScopeSpec, *MapperId,
             VE->getType().getCanonicalType(), UnresolvedMapper);
-        if (ER.isInvalid()) {
+        if (ER.isInvalid())
           continue;
-        } else if (ER.isUsable()) {
-          MVLI.UDMapperList.push_back(ER.get());
-        } else {
-          MVLI.UDMapperList.push_back(nullptr);
-        }
+        MVLI.UDMapperList.push_back(ER.get());
       } else {
         MVLI.UDMapperList.push_back(nullptr);
       }
@@ -13229,13 +13225,9 @@ static void checkMappableExpressionList(
         ExprResult ER = buildUserDefinedMapperRef(
             SemaRef, DSAS->getCurScope(), *MapperIdScopeSpec, *MapperId,
             VE->getType().getCanonicalType(), UnresolvedMapper);
-        if (ER.isInvalid()) {
+        if (ER.isInvalid())
           continue;
-        } else if (ER.isUsable()) {
-          MVLI.UDMapperList.push_back(ER.get());
-        } else {
-          MVLI.UDMapperList.push_back(nullptr);
-        }
+        MVLI.UDMapperList.push_back(ER.get());
       } else {
         MVLI.UDMapperList.push_back(nullptr);
       }
@@ -13360,13 +13352,9 @@ static void checkMappableExpressionList(
       ExprResult ER = buildUserDefinedMapperRef(
           SemaRef, DSAS->getCurScope(), *MapperIdScopeSpec, *MapperId,
           Type.getCanonicalType(), UnresolvedMapper);
-      if (ER.isInvalid()) {
+      if (ER.isInvalid())
         continue;
-      } else if (ER.isUsable()) {
-        MVLI.UDMapperList.push_back(ER.get());
-      } else {
-        MVLI.UDMapperList.push_back(nullptr);
-      }
+      MVLI.UDMapperList.push_back(ER.get());
     } else {
       MVLI.UDMapperList.push_back(nullptr);
     }

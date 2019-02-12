@@ -1072,7 +1072,7 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
     IEnd = IdResolver.end();
 
   if (NameKind == LookupOMPMapperName) {
-    // Skip out-of-scope declarations.
+    // Skip declarations in inner scopes.
     for (; I != IEnd; ++I) {
       Scope *CurS = S;
       while (CurS && !CurS->isDeclScope(*I))
@@ -1791,7 +1791,7 @@ bool Sema::LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation) {
                  !isa<ImplicitParamDecl>(*I))
           continue;
         else if (NameKind == LookupOMPMapperName) {
-          // Skip out-of-scope declarations.
+          // Skip declarations in inner scopes.
           Scope *CurS = S;
           while (CurS && !CurS->isDeclScope(*I))
             CurS = CurS->getParent();
