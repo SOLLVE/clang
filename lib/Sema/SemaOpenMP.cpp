@@ -10654,7 +10654,7 @@ static NamedDecl *findAcceptableDecl(Sema &SemaRef, NamedDecl *D) {
 }
 
 static void
-argumentDependentLookup(Sema &SemaRef, const DeclarationNameInfo &ReductionId,
+argumentDependentLookup(Sema &SemaRef, const DeclarationNameInfo &Id,
                         SourceLocation Loc, QualType Ty,
                         SmallVectorImpl<UnresolvedSet<8>> &Lookups) {
   // Find all of the associated namespaces and classes based on the
@@ -10688,13 +10688,14 @@ argumentDependentLookup(Sema &SemaRef, const DeclarationNameInfo &ReductionId,
     //        associated classes are visible within their respective
     //        namespaces even if they are not visible during an ordinary
     //        lookup (11.4).
-    DeclContext::lookup_result R = NS->lookup(ReductionId.getName());
+    DeclContext::lookup_result R = NS->lookup(Id.getName());
     for (auto *D : R) {
       auto *Underlying = D;
       if (auto *USD = dyn_cast<UsingShadowDecl>(D))
         Underlying = USD->getTargetDecl();
 
-      if (!isa<OMPDeclareReductionDecl>(Underlying))
+      if (!isa<OMPDeclareReductionDecl>(Underlying) &&
+          !isa<OMPDeclareMapperDecl>(Underlying))
         continue;
 
       if (!SemaRef.isVisible(D)) {
@@ -13060,8 +13061,11 @@ ExprResult buildUserDefinedMapperRef(Sema &SemaRef, Scope *S,
   //  The type must be of struct, union or class type in C and C++
   if (!Type->isStructureOrClassType() && !Type->isUnionType())
     return ExprEmpty();
-  // Return the first user-defined mapper with the desired type.
   SourceLocation Loc = MapperId.getLoc();
+  // Perform argument dependent lookup.
+  if (SemaRef.getLangOpts().CPlusPlus && !MapperIdScopeSpec.isSet())
+    argumentDependentLookup(SemaRef, MapperId, Loc, Type, Lookups);
+  // Return the first user-defined mapper with the desired type.
   if (auto *VD = filterLookupForUDReductionAndMapper<ValueDecl *>(
           Lookups, [&SemaRef, Type](ValueDecl *D) -> ValueDecl * {
             if (!D->isInvalidDecl() &&
