@@ -9742,9 +9742,9 @@ OMPClause *Sema::ActOnOpenMPVarListClause(
     ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
     ArrayRef<SourceLocation> MapTypeModifiersLoc, OpenMPMapClauseKind MapType,
     bool IsMapTypeImplicit, SourceLocation DepLinMapLoc) {
-  SourceLocation StartLoc = OMPVarListLocTy.StartLoc;
-  SourceLocation LParenLoc = OMPVarListLocTy.LParenLoc;
-  SourceLocation EndLoc = OMPVarListLocTy.EndLoc;
+  SourceLocation StartLoc = Locs.StartLoc;
+  SourceLocation LParenLoc = Locs.LParenLoc;
+  SourceLocation EndLoc = Locs.EndLoc;
   OMPClause *Res = nullptr;
   switch (Kind) {
   case OMPC_private:
