@@ -3651,38 +3651,6 @@ protected:
   /// components.
   ///
   /// \param K Kind of the clause.
-  /// \param StartLoc Starting location of the clause (the clause keyword).
-  /// \param LParenLoc Location of '('.
-  /// \param EndLoc Ending location of the clause.
-  /// \param NumVars Number of expressions listed in the clause.
-  /// \param NumUniqueDeclarations Number of unique base declarations in this
-  /// clause.
-  /// \param NumComponentLists Number of component lists in this clause - one
-  /// list for each expression in the clause.
-  /// \param NumComponents Total number of expression components in the clause.
-  /// \param MapperQualifierLocPtr C++ nested name specifier for the associated
-  /// user-defined mapper.
-  /// \param MapperIdInfoPtr The identifier of associated user-defined mapper.
-  OMPMappableExprListClause(
-      OpenMPClauseKind K, SourceLocation StartLoc, SourceLocation LParenLoc,
-      SourceLocation EndLoc, unsigned NumVars, unsigned NumUniqueDeclarations,
-      unsigned NumComponentLists, unsigned NumComponents,
-      NestedNameSpecifierLoc *MapperQualifierLocPtr = nullptr,
-      DeclarationNameInfo *MapperIdInfoPtr = nullptr)
-      : OMPVarListClause<T>(K, StartLoc, LParenLoc, EndLoc, NumVars),
-        NumUniqueDeclarations(NumUniqueDeclarations),
-        NumComponentLists(NumComponentLists), NumComponents(NumComponents) {
-    if (MapperQualifierLocPtr)
-      MapperQualifierLoc = *MapperQualifierLocPtr;
-    if (MapperIdInfoPtr)
-      MapperIdInfo = *MapperIdInfoPtr;
-  }
-
-  /// Build a clause for \a NumUniqueDeclarations declarations, \a
-  /// NumComponentLists total component lists, and \a NumComponents total
-  /// components.
-  ///
-  /// \param K Kind of the clause.
   /// \param Locs Locations needed to build a mappable clause. It includes 1)
   /// StartLoc: starting location of the clause (the clause keyword); 2)
   /// LParenLoc: location of '('; 3) EndLoc: ending location of the clause.
