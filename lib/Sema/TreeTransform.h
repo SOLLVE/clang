@@ -1892,10 +1892,8 @@ public:
   /// By default, performs semantic analysis to build the new statement.
   /// Subclasses may override this routine to provide different behavior.
   OMPClause *RebuildOMPToClause(ArrayRef<Expr *> VarList,
-                                SourceLocation StartLoc,
-                                SourceLocation LParenLoc,
-                                SourceLocation EndLoc) {
-    return getSema().ActOnOpenMPToClause(VarList, StartLoc, LParenLoc, EndLoc);
+                                OMPMappableExprListLocTy Locs) {
+    return getSema().ActOnOpenMPToClause(VarList, Locs);
   }
 
   /// Build a new OpenMP 'from' clause.
@@ -8938,8 +8936,9 @@ OMPClause *TreeTransform<Derived>::TransformOMPToClause(OMPToClause *C) {
       return 0;
     Vars.push_back(EVar.get());
   }
-  return getDerived().RebuildOMPToClause(Vars, C->getBeginLoc(),
-                                         C->getLParenLoc(), C->getEndLoc());
+  OMPMappableExprListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(),
+                                C->getEndLoc());
+  return getDerived().RebuildOMPToClause(Vars, Locs);
 }
 
 template <typename Derived>

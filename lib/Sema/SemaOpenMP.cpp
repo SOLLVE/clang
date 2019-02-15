@@ -9799,7 +9799,8 @@ OMPClause *Sema::ActOnOpenMPVarListClause(
         VarList, OMPMappableExprListLocTy(StartLoc, LParenLoc, EndLoc));
     break;
   case OMPC_to:
-    Res = ActOnOpenMPToClause(VarList, StartLoc, LParenLoc, EndLoc);
+    Res = ActOnOpenMPToClause(
+        VarList, OMPMappableExprListLocTy(StartLoc, LParenLoc, EndLoc));
     break;
   case OMPC_from:
     Res = ActOnOpenMPFromClause(VarList, StartLoc, LParenLoc, EndLoc);
@@ -14166,17 +14167,14 @@ void Sema::checkDeclIsAllowedInOpenMPTarget(Expr *E, Decl *D,
 }
 
 OMPClause *Sema::ActOnOpenMPToClause(ArrayRef<Expr *> VarList,
-                                     SourceLocation StartLoc,
-                                     SourceLocation LParenLoc,
-                                     SourceLocation EndLoc) {
+                                     OMPMappableExprListLocTy Locs) {
   MappableVarListInfo MVLI(VarList);
-  checkMappableExpressionList(*this, DSAStack, OMPC_to, MVLI, StartLoc);
+  checkMappableExpressionList(*this, DSAStack, OMPC_to, MVLI, Locs.StartLoc);
   if (MVLI.ProcessedVarList.empty())
     return nullptr;
 
-  return OMPToClause::Create(Context, StartLoc, LParenLoc, EndLoc,
-                             MVLI.ProcessedVarList, MVLI.VarBaseDeclarations,
-                             MVLI.VarComponents);
+  return OMPToClause::Create(Context, Locs, MVLI.ProcessedVarList,
+                             MVLI.VarBaseDeclarations, MVLI.VarComponents);
 }
 
 OMPClause *Sema::ActOnOpenMPFromClause(ArrayRef<Expr *> VarList,

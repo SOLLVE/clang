@@ -844,16 +844,16 @@ OMPMapClause *OMPMapClause::CreateEmpty(const ASTContext &C,
   return new (Mem) OMPMapClause(Sizes);
 }
 
-OMPToClause *OMPToClause::Create(const ASTContext &C, SourceLocation StartLoc,
-                                 SourceLocation LParenLoc,
-                                 SourceLocation EndLoc, ArrayRef<Expr *> Vars,
+OMPToClause *OMPToClause::Create(const ASTContext &C,
+                                 OMPMappableExprListLocTy Locs,
+                                 ArrayRef<Expr *> Vars,
                                  ArrayRef<ValueDecl *> Declarations,
                                  MappableExprComponentListsRef ComponentLists) {
-  unsigned NumVars = Vars.size();
-  unsigned NumUniqueDeclarations =
-      getUniqueDeclarationsTotalNumber(Declarations);
-  unsigned NumComponentLists = ComponentLists.size();
-  unsigned NumComponents = getComponentsTotalNumber(ComponentLists);
+  OMPMappableExprListSizeTy Sizes;
+  Sizes.NumVars = Vars.size();
+  Sizes.NumUniqueDeclarations = getUniqueDeclarationsTotalNumber(Declarations);
+  Sizes.NumComponentLists = ComponentLists.size();
+  Sizes.NumComponents = getComponentsTotalNumber(ComponentLists);
 
   // We need to allocate:
   // NumVars x Expr* - we have an original list expression for each clause list
@@ -868,29 +868,26 @@ OMPToClause *OMPToClause::Create(const ASTContext &C, SourceLocation StartLoc,
   void *Mem = C.Allocate(
       totalSizeToAlloc<Expr *, ValueDecl *, unsigned,
                        OMPClauseMappableExprCommon::MappableComponent>(
-          NumVars, NumUniqueDeclarations,
-          NumUniqueDeclarations + NumComponentLists, NumComponents));
+          Sizes.NumVars, Sizes.NumUniqueDeclarations,
+          Sizes.NumUniqueDeclarations + Sizes.NumComponentLists,
+          Sizes.NumComponents));
 
-  OMPToClause *Clause = new (Mem)
-      OMPToClause(StartLoc, LParenLoc, EndLoc, NumVars, NumUniqueDeclarations,
-                  NumComponentLists, NumComponents);
+  OMPToClause *Clause = new (Mem) OMPToClause(Locs, Sizes);
 
   Clause->setVarRefs(Vars);
   Clause->setClauseInfo(Declarations, ComponentLists);
   return Clause;
 }
 
-OMPToClause *OMPToClause::CreateEmpty(const ASTContext &C, unsigned NumVars,
-                                      unsigned NumUniqueDeclarations,
-                                      unsigned NumComponentLists,
-                                      unsigned NumComponents) {
+OMPToClause *OMPToClause::CreateEmpty(const ASTContext &C,
+                                      OMPMappableExprListSizeTy Sizes) {
   void *Mem = C.Allocate(
       totalSizeToAlloc<Expr *, ValueDecl *, unsigned,
                        OMPClauseMappableExprCommon::MappableComponent>(
-          NumVars, NumUniqueDeclarations,
-          NumUniqueDeclarations + NumComponentLists, NumComponents));
-  return new (Mem) OMPToClause(NumVars, NumUniqueDeclarations,
-                               NumComponentLists, NumComponents);
+          Sizes.NumVars, Sizes.NumUniqueDeclarations,
+          Sizes.NumUniqueDeclarations + Sizes.NumComponentLists,
+          Sizes.NumComponents));
+  return new (Mem) OMPToClause(Sizes);
 }
 
 OMPFromClause *
