@@ -11844,12 +11844,12 @@ OMPClause *OMPClauseReader::readClause() {
     break;
   }
   case OMPC_is_device_ptr: {
-    unsigned NumVars = Record.readInt();
-    unsigned NumDeclarations = Record.readInt();
-    unsigned NumLists = Record.readInt();
-    unsigned NumComponents = Record.readInt();
-    C = OMPIsDevicePtrClause::CreateEmpty(Context, NumVars, NumDeclarations,
-                                          NumLists, NumComponents);
+    OMPMappableExprListSizeTy Sizes;
+    Sizes.NumVars = Record.readInt();
+    Sizes.NumUniqueDeclarations = Record.readInt();
+    Sizes.NumComponentLists = Record.readInt();
+    Sizes.NumComponents = Record.readInt();
+    C = OMPIsDevicePtrClause::CreateEmpty(Context, Sizes);
     break;
   }
   }

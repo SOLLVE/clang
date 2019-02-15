@@ -5350,43 +5350,28 @@ class OMPIsDevicePtrClause final
 
   /// Build clause with number of variables \a NumVars.
   ///
-  /// \param StartLoc Starting location of the clause.
-  /// \param EndLoc Ending location of the clause.
-  /// \param NumVars Number of expressions listed in this clause.
-  /// \param NumUniqueDeclarations Number of unique base declarations in this
-  /// clause.
-  /// \param NumComponentLists Number of component lists in this clause.
-  /// \param NumComponents Total number of expression components in the clause.
-  explicit OMPIsDevicePtrClause(SourceLocation StartLoc,
-                                SourceLocation LParenLoc, SourceLocation EndLoc,
-                                unsigned NumVars,
-                                unsigned NumUniqueDeclarations,
-                                unsigned NumComponentLists,
-                                unsigned NumComponents)
-      : OMPMappableExprListClause(OMPC_is_device_ptr, StartLoc, LParenLoc,
-                                  EndLoc, NumVars, NumUniqueDeclarations,
-                                  NumComponentLists, NumComponents) {}
-
-  /// Build an empty clause.
-  ///
-  /// \param NumVars Number of expressions listed in this clause.
-  /// \param NumUniqueDeclarations Number of unique base declarations in this
-  /// clause.
-  /// \param NumComponentLists Number of component lists in this clause.
-  /// \param NumComponents Total number of expression components in the clause.
+  /// \param Locs Locations needed to build a mappable clause. It includes 1)
+  /// StartLoc: starting location of the clause (the clause keyword); 2)
+  /// LParenLoc: location of '('; 3) EndLoc: ending location of the clause.
   /// \param Sizes All required sizes to build a mappable clause. It includes 1)
   /// NumVars: number of expressions listed in this clause; 2)
   /// NumUniqueDeclarations: number of unique base declarations in this clause;
   /// 3) NumComponentLists: number of component lists in this clause; and 4)
   /// NumComponents: total number of expression components in the clause.
-  explicit OMPIsDevicePtrClause(unsigned NumVars,
-                                unsigned NumUniqueDeclarations,
-                                unsigned NumComponentLists,
-                                unsigned NumComponents)
-      : OMPMappableExprListClause(OMPC_is_device_ptr, SourceLocation(),
-                                  SourceLocation(), SourceLocation(), NumVars,
-                                  NumUniqueDeclarations, NumComponentLists,
-                                  NumComponents) {}
+  explicit OMPIsDevicePtrClause(OMPMappableExprListLocTy Locs,
+                                OMPMappableExprListSizeTy Sizes)
+      : OMPMappableExprListClause(OMPC_is_device_ptr, Locs, Sizes) {}
+
+  /// Build an empty clause.
+  ///
+  /// \param Sizes All required sizes to build a mappable clause. It includes 1)
+  /// NumVars: number of expressions listed in this clause; 2)
+  /// NumUniqueDeclarations: number of unique base declarations in this clause;
+  /// 3) NumComponentLists: number of component lists in this clause; and 4)
+  /// NumComponents: total number of expression components in the clause.
+  explicit OMPIsDevicePtrClause(OMPMappableExprListSizeTy Sizes)
+      : OMPMappableExprListClause(OMPC_is_device_ptr,
+                                  OMPMappableExprListLocTy(), Sizes) {}
 
   /// Define the sizes of each trailing object array except the last one. This
   /// is required for TrailingObjects to work properly.
@@ -5404,31 +5389,27 @@ public:
   /// Creates clause with a list of variables \a Vars.
   ///
   /// \param C AST context.
-  /// \param StartLoc Starting location of the clause.
-  /// \param EndLoc Ending location of the clause.
+  /// \param Locs Locations needed to build a mappable clause. It includes 1)
+  /// StartLoc: starting location of the clause (the clause keyword); 2)
+  /// LParenLoc: location of '('; 3) EndLoc: ending location of the clause.
   /// \param Vars The original expression used in the clause.
   /// \param Declarations Declarations used in the clause.
   /// \param ComponentLists Component lists used in the clause.
   static OMPIsDevicePtrClause *
-  Create(const ASTContext &C, SourceLocation StartLoc, SourceLocation LParenLoc,
-         SourceLocation EndLoc, ArrayRef<Expr *> Vars,
-         ArrayRef<ValueDecl *> Declarations,
+  Create(const ASTContext &C, OMPMappableExprListLocTy Locs,
+         ArrayRef<Expr *> Vars, ArrayRef<ValueDecl *> Declarations,
          MappableExprComponentListsRef ComponentLists);
 
   /// Creates an empty clause with the place for \a NumVars variables.
   ///
   /// \param C AST context.
-  /// \param NumVars Number of expressions listed in the clause.
-  /// \param NumUniqueDeclarations Number of unique base declarations in this
-  /// clause.
-  /// \param NumComponentLists Number of unique base declarations in this
-  /// clause.
-  /// \param NumComponents Total number of expression components in the clause.
+  /// \param Sizes All required sizes to build a mappable clause. It includes 1)
+  /// NumVars: number of expressions listed in this clause; 2)
+  /// NumUniqueDeclarations: number of unique base declarations in this clause;
+  /// 3) NumComponentLists: number of component lists in this clause; and 4)
+  /// NumComponents: total number of expression components in the clause.
   static OMPIsDevicePtrClause *CreateEmpty(const ASTContext &C,
-                                           unsigned NumVars,
-                                           unsigned NumUniqueDeclarations,
-                                           unsigned NumComponentLists,
-                                           unsigned NumComponents);
+                                           OMPMappableExprListSizeTy Sizes);
 
   child_range children() {
     return child_range(reinterpret_cast<Stmt **>(varlist_begin()),

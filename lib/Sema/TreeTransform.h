@@ -1922,11 +1922,8 @@ public:
   /// By default, performs semantic analysis to build the new OpenMP clause.
   /// Subclasses may override this routine to provide different behavior.
   OMPClause *RebuildOMPIsDevicePtrClause(ArrayRef<Expr *> VarList,
-                                         SourceLocation StartLoc,
-                                         SourceLocation LParenLoc,
-                                         SourceLocation EndLoc) {
-    return getSema().ActOnOpenMPIsDevicePtrClause(VarList, StartLoc, LParenLoc,
-                                                  EndLoc);
+                                         OMPMappableExprListLocTy Locs) {
+    return getSema().ActOnOpenMPIsDevicePtrClause(VarList, Locs);
   }
 
   /// Rebuild the operand to an Objective-C \@synchronized statement.
@@ -8979,8 +8976,9 @@ TreeTransform<Derived>::TransformOMPIsDevicePtrClause(OMPIsDevicePtrClause *C) {
       return nullptr;
     Vars.push_back(EVar.get());
   }
-  return getDerived().RebuildOMPIsDevicePtrClause(
-      Vars, C->getBeginLoc(), C->getLParenLoc(), C->getEndLoc());
+  OMPMappableExprListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(),
+                                C->getEndLoc());
+  return getDerived().RebuildOMPIsDevicePtrClause(Vars, Locs);
 }
 
 //===----------------------------------------------------------------------===//

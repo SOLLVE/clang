@@ -9471,9 +9471,7 @@ public:
                                            SourceLocation EndLoc);
   /// Called on well-formed 'is_device_ptr' clause.
   OMPClause *ActOnOpenMPIsDevicePtrClause(ArrayRef<Expr *> VarList,
-                                          SourceLocation StartLoc,
-                                          SourceLocation LParenLoc,
-                                          SourceLocation EndLoc);
+                                          OMPMappableExprListLocTy Locs);
 
   /// The kind of conversion being performed.
   enum CheckedConversionKind {
