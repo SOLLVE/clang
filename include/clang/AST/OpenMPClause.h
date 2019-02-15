@@ -156,6 +156,17 @@ public:
   static const OMPClauseWithPostUpdate *get(const OMPClause *C);
 };
 
+/// This structure contains most locations needed for by an OMPVarListClause.
+struct OMPVarListLocTy {
+  SourceLocation StartLoc;
+  SourceLocation LParenLoc;
+  SourceLocation EndLoc;
+  OMPVarListLocTy() = default;
+  OMPVarListLocTy(SourceLocation StartLoc, SourceLocation LParenLoc,
+                  SourceLocation EndLoc)
+      : StartLoc(StartLoc), LParenLoc(LParenLoc), EndLoc(EndLoc) {}
+};
+
 /// This represents clauses with the list of variables like 'private',
 /// 'firstprivate', 'copyin', 'shared', or 'reduction' clauses in the
 /// '#pragma omp ...' directives.
@@ -3595,7 +3606,7 @@ protected:
   getUniqueDeclarationsTotalNumber(ArrayRef<const ValueDecl *> Declarations);
 };
 
-/// This structure contains all sizes needed for by a
+/// This structure contains all sizes needed for by an
 /// OMPMappableExprListClause.
 struct OMPMappableExprListSizeTy {
   unsigned NumVars;
@@ -3607,18 +3618,6 @@ struct OMPMappableExprListSizeTy {
                             unsigned NumComponentLists, unsigned NumComponents)
       : NumVars(NumVars), NumUniqueDeclarations(NumUniqueDeclarations),
         NumComponentLists(NumComponentLists), NumComponents(NumComponents) {}
-};
-
-/// This structure contains most locations needed for by a
-/// OMPMappableExprListClause.
-struct OMPMappableExprListLocTy {
-  SourceLocation StartLoc;
-  SourceLocation LParenLoc;
-  SourceLocation EndLoc;
-  OMPMappableExprListLocTy() = default;
-  OMPMappableExprListLocTy(SourceLocation StartLoc, SourceLocation LParenLoc,
-                           SourceLocation EndLoc)
-      : StartLoc(StartLoc), LParenLoc(LParenLoc), EndLoc(EndLoc) {}
 };
 
 /// This represents clauses with a list of expressions that are mappable.
@@ -3663,7 +3662,7 @@ protected:
   /// user-defined mapper.
   /// \param MapperIdInfoPtr The identifier of associated user-defined mapper.
   OMPMappableExprListClause(
-      OpenMPClauseKind K, const OMPMappableExprListLocTy &Locs,
+      OpenMPClauseKind K, const OMPVarListLocTy &Locs,
       const OMPMappableExprListSizeTy &Sizes,
       NestedNameSpecifierLoc *MapperQualifierLocPtr = nullptr,
       DeclarationNameInfo *MapperIdInfoPtr = nullptr)
@@ -4220,8 +4219,7 @@ private:
                         NestedNameSpecifierLoc MapperQualifierLoc,
                         DeclarationNameInfo MapperIdInfo,
                         OpenMPMapClauseKind MapType, bool MapTypeIsImplicit,
-                        SourceLocation MapLoc,
-                        const OMPMappableExprListLocTy &Locs,
+                        SourceLocation MapLoc, const OMPVarListLocTy &Locs,
                         const OMPMappableExprListSizeTy &Sizes)
       : OMPMappableExprListClause(OMPC_map, Locs, Sizes, &MapperQualifierLoc,
                                   &MapperIdInfo),
@@ -4244,8 +4242,7 @@ private:
   /// 3) NumComponentLists: number of component lists in this clause; and 4)
   /// NumComponents: total number of expression components in the clause.
   explicit OMPMapClause(const OMPMappableExprListSizeTy &Sizes)
-      : OMPMappableExprListClause(OMPC_map, OMPMappableExprListLocTy(), Sizes) {
-  }
+      : OMPMappableExprListClause(OMPC_map, OMPVarListLocTy(), Sizes) {}
 
   /// Set map-type-modifier for the clause.
   ///
@@ -4301,7 +4298,7 @@ public:
   /// \param TypeIsImplicit Map type is inferred implicitly.
   /// \param TypeLoc Location of the map type.
   static OMPMapClause *
-  Create(const ASTContext &C, const OMPMappableExprListLocTy &Locs,
+  Create(const ASTContext &C, const OMPVarListLocTy &Locs,
          ArrayRef<Expr *> Vars, ArrayRef<ValueDecl *> Declarations,
          MappableExprComponentListsRef ComponentLists,
          ArrayRef<Expr *> UDMapperRefs,
@@ -4980,7 +4977,7 @@ class OMPToClause final : public OMPMappableExprListClause<OMPToClause>,
   /// NumUniqueDeclarations: number of unique base declarations in this clause;
   /// 3) NumComponentLists: number of component lists in this clause; and 4)
   /// NumComponents: total number of expression components in the clause.
-  explicit OMPToClause(const OMPMappableExprListLocTy &Locs,
+  explicit OMPToClause(const OMPVarListLocTy &Locs,
                        const OMPMappableExprListSizeTy &Sizes)
       : OMPMappableExprListClause(OMPC_to, Locs, Sizes) {}
 
@@ -4992,7 +4989,7 @@ class OMPToClause final : public OMPMappableExprListClause<OMPToClause>,
   /// 3) NumComponentLists: number of component lists in this clause; and 4)
   /// NumComponents: total number of expression components in the clause.
   explicit OMPToClause(const OMPMappableExprListSizeTy &Sizes)
-      : OMPMappableExprListClause(OMPC_to, OMPMappableExprListLocTy(), Sizes) {}
+      : OMPMappableExprListClause(OMPC_to, OMPVarListLocTy(), Sizes) {}
 
   /// Define the sizes of each trailing object array except the last one. This
   /// is required for TrailingObjects to work properly.
@@ -5016,8 +5013,7 @@ public:
   /// \param Vars The original expression used in the clause.
   /// \param Declarations Declarations used in the clause.
   /// \param ComponentLists Component lists used in the clause.
-  static OMPToClause *Create(const ASTContext &C,
-                             const OMPMappableExprListLocTy &Locs,
+  static OMPToClause *Create(const ASTContext &C, const OMPVarListLocTy &Locs,
                              ArrayRef<Expr *> Vars,
                              ArrayRef<ValueDecl *> Declarations,
                              MappableExprComponentListsRef ComponentLists);
@@ -5071,7 +5067,7 @@ class OMPFromClause final
   /// NumUniqueDeclarations: number of unique base declarations in this clause;
   /// 3) NumComponentLists: number of component lists in this clause; and 4)
   /// NumComponents: total number of expression components in the clause.
-  explicit OMPFromClause(const OMPMappableExprListLocTy &Locs,
+  explicit OMPFromClause(const OMPVarListLocTy &Locs,
                          const OMPMappableExprListSizeTy &Sizes)
       : OMPMappableExprListClause(OMPC_from, Locs, Sizes) {}
 
@@ -5083,8 +5079,7 @@ class OMPFromClause final
   /// 3) NumComponentLists: number of component lists in this clause; and 4)
   /// NumComponents: total number of expression components in the clause.
   explicit OMPFromClause(const OMPMappableExprListSizeTy &Sizes)
-      : OMPMappableExprListClause(OMPC_from, OMPMappableExprListLocTy(),
-                                  Sizes) {}
+      : OMPMappableExprListClause(OMPC_from, OMPVarListLocTy(), Sizes) {}
 
   /// Define the sizes of each trailing object array except the last one. This
   /// is required for TrailingObjects to work properly.
@@ -5108,8 +5103,7 @@ public:
   /// \param Vars The original expression used in the clause.
   /// \param Declarations Declarations used in the clause.
   /// \param ComponentLists Component lists used in the clause.
-  static OMPFromClause *Create(const ASTContext &C,
-                               const OMPMappableExprListLocTy &Locs,
+  static OMPFromClause *Create(const ASTContext &C, const OMPVarListLocTy &Locs,
                                ArrayRef<Expr *> Vars,
                                ArrayRef<ValueDecl *> Declarations,
                                MappableExprComponentListsRef ComponentLists);
@@ -5163,7 +5157,7 @@ class OMPUseDevicePtrClause final
   /// NumUniqueDeclarations: number of unique base declarations in this clause;
   /// 3) NumComponentLists: number of component lists in this clause; and 4)
   /// NumComponents: total number of expression components in the clause.
-  explicit OMPUseDevicePtrClause(const OMPMappableExprListLocTy &Locs,
+  explicit OMPUseDevicePtrClause(const OMPVarListLocTy &Locs,
                                  const OMPMappableExprListSizeTy &Sizes)
       : OMPMappableExprListClause(OMPC_use_device_ptr, Locs, Sizes) {}
 
@@ -5175,8 +5169,8 @@ class OMPUseDevicePtrClause final
   /// 3) NumComponentLists: number of component lists in this clause; and 4)
   /// NumComponents: total number of expression components in the clause.
   explicit OMPUseDevicePtrClause(const OMPMappableExprListSizeTy &Sizes)
-      : OMPMappableExprListClause(OMPC_use_device_ptr,
-                                  OMPMappableExprListLocTy(), Sizes) {}
+      : OMPMappableExprListClause(OMPC_use_device_ptr, OMPVarListLocTy(),
+                                  Sizes) {}
 
   /// Define the sizes of each trailing object array except the last one. This
   /// is required for TrailingObjects to work properly.
@@ -5231,7 +5225,7 @@ public:
   /// \param Declarations Declarations used in the clause.
   /// \param ComponentLists Component lists used in the clause.
   static OMPUseDevicePtrClause *
-  Create(const ASTContext &C, const OMPMappableExprListLocTy &Locs,
+  Create(const ASTContext &C, const OMPVarListLocTy &Locs,
          ArrayRef<Expr *> Vars, ArrayRef<Expr *> PrivateVars,
          ArrayRef<Expr *> Inits, ArrayRef<ValueDecl *> Declarations,
          MappableExprComponentListsRef ComponentLists);
@@ -5314,7 +5308,7 @@ class OMPIsDevicePtrClause final
   /// NumUniqueDeclarations: number of unique base declarations in this clause;
   /// 3) NumComponentLists: number of component lists in this clause; and 4)
   /// NumComponents: total number of expression components in the clause.
-  explicit OMPIsDevicePtrClause(const OMPMappableExprListLocTy &Locs,
+  explicit OMPIsDevicePtrClause(const OMPVarListLocTy &Locs,
                                 const OMPMappableExprListSizeTy &Sizes)
       : OMPMappableExprListClause(OMPC_is_device_ptr, Locs, Sizes) {}
 
@@ -5326,8 +5320,8 @@ class OMPIsDevicePtrClause final
   /// 3) NumComponentLists: number of component lists in this clause; and 4)
   /// NumComponents: total number of expression components in the clause.
   explicit OMPIsDevicePtrClause(const OMPMappableExprListSizeTy &Sizes)
-      : OMPMappableExprListClause(OMPC_is_device_ptr,
-                                  OMPMappableExprListLocTy(), Sizes) {}
+      : OMPMappableExprListClause(OMPC_is_device_ptr, OMPVarListLocTy(),
+                                  Sizes) {}
 
   /// Define the sizes of each trailing object array except the last one. This
   /// is required for TrailingObjects to work properly.
@@ -5352,7 +5346,7 @@ public:
   /// \param Declarations Declarations used in the clause.
   /// \param ComponentLists Component lists used in the clause.
   static OMPIsDevicePtrClause *
-  Create(const ASTContext &C, const OMPMappableExprListLocTy &Locs,
+  Create(const ASTContext &C, const OMPVarListLocTy &Locs,
          ArrayRef<Expr *> Vars, ArrayRef<ValueDecl *> Declarations,
          MappableExprComponentListsRef ComponentLists);
 

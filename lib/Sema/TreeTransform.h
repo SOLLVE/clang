@@ -1805,15 +1805,13 @@ public:
   ///
   /// By default, performs semantic analysis to build the new OpenMP clause.
   /// Subclasses may override this routine to provide different behavior.
-  OMPClause *
-  RebuildOMPMapClause(ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
-                      ArrayRef<SourceLocation> MapTypeModifiersLoc,
-                      CXXScopeSpec MapperIdScopeSpec,
-                      DeclarationNameInfo MapperId, OpenMPMapClauseKind MapType,
-                      bool IsMapTypeImplicit, SourceLocation MapLoc,
-                      SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
-                      const OMPMappableExprListLocTy &Locs,
-                      ArrayRef<Expr *> UnresolvedMappers) {
+  OMPClause *RebuildOMPMapClause(
+      ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
+      ArrayRef<SourceLocation> MapTypeModifiersLoc,
+      CXXScopeSpec MapperIdScopeSpec, DeclarationNameInfo MapperId,
+      OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
+      SourceLocation MapLoc, SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
+      const OMPVarListLocTy &Locs, ArrayRef<Expr *> UnresolvedMappers) {
     return getSema().ActOnOpenMPMapClause(MapTypeModifiers, MapTypeModifiersLoc,
                                           MapperIdScopeSpec, MapperId, MapType,
                                           IsMapTypeImplicit, MapLoc, ColonLoc,
@@ -1904,7 +1902,7 @@ public:
   /// By default, performs semantic analysis to build the new statement.
   /// Subclasses may override this routine to provide different behavior.
   OMPClause *RebuildOMPToClause(ArrayRef<Expr *> VarList,
-                                const OMPMappableExprListLocTy &Locs) {
+                                const OMPVarListLocTy &Locs) {
     return getSema().ActOnOpenMPToClause(VarList, Locs);
   }
 
@@ -1913,7 +1911,7 @@ public:
   /// By default, performs semantic analysis to build the new statement.
   /// Subclasses may override this routine to provide different behavior.
   OMPClause *RebuildOMPFromClause(ArrayRef<Expr *> VarList,
-                                  const OMPMappableExprListLocTy &Locs) {
+                                  const OMPVarListLocTy &Locs) {
     return getSema().ActOnOpenMPFromClause(VarList, Locs);
   }
 
@@ -1921,9 +1919,8 @@ public:
   ///
   /// By default, performs semantic analysis to build the new OpenMP clause.
   /// Subclasses may override this routine to provide different behavior.
-  OMPClause *
-  RebuildOMPUseDevicePtrClause(ArrayRef<Expr *> VarList,
-                               const OMPMappableExprListLocTy &Locs) {
+  OMPClause *RebuildOMPUseDevicePtrClause(ArrayRef<Expr *> VarList,
+                                          const OMPVarListLocTy &Locs) {
     return getSema().ActOnOpenMPUseDevicePtrClause(VarList, Locs);
   }
 
@@ -1932,7 +1929,7 @@ public:
   /// By default, performs semantic analysis to build the new OpenMP clause.
   /// Subclasses may override this routine to provide different behavior.
   OMPClause *RebuildOMPIsDevicePtrClause(ArrayRef<Expr *> VarList,
-                                         const OMPMappableExprListLocTy &Locs) {
+                                         const OMPVarListLocTy &Locs) {
     return getSema().ActOnOpenMPIsDevicePtrClause(VarList, Locs);
   }
 
@@ -8860,8 +8857,7 @@ OMPClause *TreeTransform<Derived>::TransformOMPMapClause(OMPMapClause *C) {
       UnresolvedMappers.push_back(nullptr);
     }
   }
-  OMPMappableExprListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(),
-                                C->getEndLoc());
+  OMPVarListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(), C->getEndLoc());
   return getDerived().RebuildOMPMapClause(
       C->getMapTypeModifiers(), C->getMapTypeModifiersLoc(), MapperIdScopeSpec,
       MapperIdInfo, C->getMapType(), C->isImplicitMapType(), C->getMapLoc(),
@@ -8954,8 +8950,7 @@ OMPClause *TreeTransform<Derived>::TransformOMPToClause(OMPToClause *C) {
       return 0;
     Vars.push_back(EVar.get());
   }
-  OMPMappableExprListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(),
-                                C->getEndLoc());
+  OMPVarListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(), C->getEndLoc());
   return getDerived().RebuildOMPToClause(Vars, Locs);
 }
 
@@ -8969,8 +8964,7 @@ OMPClause *TreeTransform<Derived>::TransformOMPFromClause(OMPFromClause *C) {
       return 0;
     Vars.push_back(EVar.get());
   }
-  OMPMappableExprListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(),
-                                C->getEndLoc());
+  OMPVarListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(), C->getEndLoc());
   return getDerived().RebuildOMPFromClause(Vars, Locs);
 }
 
@@ -8985,8 +8979,7 @@ OMPClause *TreeTransform<Derived>::TransformOMPUseDevicePtrClause(
       return nullptr;
     Vars.push_back(EVar.get());
   }
-  OMPMappableExprListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(),
-                                C->getEndLoc());
+  OMPVarListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(), C->getEndLoc());
   return getDerived().RebuildOMPUseDevicePtrClause(Vars, Locs);
 }
 
@@ -9001,8 +8994,7 @@ TreeTransform<Derived>::TransformOMPIsDevicePtrClause(OMPIsDevicePtrClause *C) {
       return nullptr;
     Vars.push_back(EVar.get());
   }
-  OMPMappableExprListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(),
-                                C->getEndLoc());
+  OMPVarListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(), C->getEndLoc());
   return getDerived().RebuildOMPIsDevicePtrClause(Vars, Locs);
 }
 

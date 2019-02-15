@@ -2996,8 +2996,8 @@ TemplateDeclInstantiator::VisitOMPDeclareMapperDecl(OMPDeclareMapperDecl *D) {
       SS.Adopt(NewQualifierLoc);
       DeclarationNameInfo NewNameInfo = SemaRef.SubstDeclarationNameInfo(
           OldC->getMapperIdInfo(), TemplateArgs);
-      OMPMappableExprListLocTy Locs(OldC->getBeginLoc(), OldC->getLParenLoc(),
-                                    OldC->getEndLoc());
+      OMPVarListLocTy Locs(OldC->getBeginLoc(), OldC->getLParenLoc(),
+                           OldC->getEndLoc());
       OMPClause *NewC = SemaRef.ActOnOpenMPMapClause(
           OldC->getMapTypeModifiers(), OldC->getMapTypeModifiersLoc(), SS,
           NewNameInfo, OldC->getMapType(), OldC->isImplicitMapType(),
