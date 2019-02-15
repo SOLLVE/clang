@@ -1901,11 +1901,8 @@ public:
   /// By default, performs semantic analysis to build the new statement.
   /// Subclasses may override this routine to provide different behavior.
   OMPClause *RebuildOMPFromClause(ArrayRef<Expr *> VarList,
-                                  SourceLocation StartLoc,
-                                  SourceLocation LParenLoc,
-                                  SourceLocation EndLoc) {
-    return getSema().ActOnOpenMPFromClause(VarList, StartLoc, LParenLoc,
-                                           EndLoc);
+                                  OMPMappableExprListLocTy Locs) {
+    return getSema().ActOnOpenMPFromClause(VarList, Locs);
   }
 
   /// Build a new OpenMP 'use_device_ptr' clause.
@@ -8951,8 +8948,9 @@ OMPClause *TreeTransform<Derived>::TransformOMPFromClause(OMPFromClause *C) {
       return 0;
     Vars.push_back(EVar.get());
   }
-  return getDerived().RebuildOMPFromClause(Vars, C->getBeginLoc(),
-                                           C->getLParenLoc(), C->getEndLoc());
+  OMPMappableExprListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(),
+                                C->getEndLoc());
+  return getDerived().RebuildOMPFromClause(Vars, Locs);
 }
 
 template <typename Derived>
