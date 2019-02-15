@@ -1801,12 +1801,11 @@ public:
       CXXScopeSpec MapperIdScopeSpec, DeclarationNameInfo MapperId,
       OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
       SourceLocation MapLoc, SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
-      SourceLocation StartLoc, SourceLocation LParenLoc, SourceLocation EndLoc,
-      ArrayRef<Expr *> UnresolvedMappers) {
-    return getSema().ActOnOpenMPMapClause(
-        MapTypeModifiers, MapTypeModifiersLoc, MapperIdScopeSpec, MapperId,
-        MapType, IsMapTypeImplicit, MapLoc, ColonLoc, VarList, StartLoc,
-        LParenLoc, EndLoc, UnresolvedMappers);
+      OMPMappableExprListLocTy Locs, ArrayRef<Expr *> UnresolvedMappers) {
+    return getSema().ActOnOpenMPMapClause(MapTypeModifiers, MapTypeModifiersLoc,
+                                          MapperIdScopeSpec, MapperId, MapType,
+                                          IsMapTypeImplicit, MapLoc, ColonLoc,
+                                          VarList, Locs, UnresolvedMappers);
   }
 
   /// Build a new OpenMP 'num_teams' clause.
@@ -8845,11 +8844,12 @@ OMPClause *TreeTransform<Derived>::TransformOMPMapClause(OMPMapClause *C) {
       UnresolvedMappers.push_back(nullptr);
     }
   }
+  OMPMappableExprListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(),
+                                C->getEndLoc());
   return getDerived().RebuildOMPMapClause(
       C->getMapTypeModifiers(), C->getMapTypeModifiersLoc(), MapperIdScopeSpec,
       MapperIdInfo, C->getMapType(), C->isImplicitMapType(), C->getMapLoc(),
-      C->getColonLoc(), Vars, C->getBeginLoc(), C->getLParenLoc(),
-      C->getEndLoc(), UnresolvedMappers);
+      C->getColonLoc(), Vars, Locs, UnresolvedMappers);
 }
 
 template <typename Derived>

@@ -792,8 +792,7 @@ unsigned OMPClauseMappableExprCommon::getUniqueDeclarationsTotalNumber(
 }
 
 OMPMapClause *OMPMapClause::Create(
-    const ASTContext &C, SourceLocation StartLoc, SourceLocation LParenLoc,
-    SourceLocation EndLoc, ArrayRef<Expr *> Vars,
+    const ASTContext &C, OMPMappableExprListLocTy Locs, ArrayRef<Expr *> Vars,
     ArrayRef<ValueDecl *> Declarations,
     MappableExprComponentListsRef ComponentLists, ArrayRef<Expr *> UDMapperRefs,
     ArrayRef<OpenMPMapModifierKind> MapModifiers,
@@ -822,9 +821,9 @@ OMPMapClause *OMPMapClause::Create(
           2 * Sizes.NumVars, Sizes.NumUniqueDeclarations,
           Sizes.NumUniqueDeclarations + Sizes.NumComponentLists,
           Sizes.NumComponents));
-  OMPMapClause *Clause = new (Mem) OMPMapClause(
-      MapModifiers, MapModifiersLoc, UDMQualifierLoc, MapperId, Type,
-      TypeIsImplicit, TypeLoc, StartLoc, LParenLoc, EndLoc, Sizes);
+  OMPMapClause *Clause = new (Mem)
+      OMPMapClause(MapModifiers, MapModifiersLoc, UDMQualifierLoc, MapperId,
+                   Type, TypeIsImplicit, TypeLoc, Locs, Sizes);
 
   Clause->setVarRefs(Vars);
   Clause->setUDMapperRefs(UDMapperRefs);

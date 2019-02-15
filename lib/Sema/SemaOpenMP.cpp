@@ -3456,8 +3456,7 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
       if (OMPClause *Implicit = ActOnOpenMPMapClause(
               llvm::None, llvm::None, MapperIdScopeSpec, MapperId,
               OMPC_MAP_tofrom, /*IsMapTypeImplicit=*/true, SourceLocation(),
-              SourceLocation(), ImplicitMaps, SourceLocation(),
-              SourceLocation(), SourceLocation())) {
+              SourceLocation(), ImplicitMaps, OMPMappableExprListLocTy())) {
         ClausesWithImplicit.emplace_back(Implicit);
         ErrorFound |=
             cast<OMPMapClause>(Implicit)->varlist_size() != ImplicitMaps.size();
@@ -9797,7 +9796,7 @@ OMPClause *Sema::ActOnOpenMPVarListClause(
     Res = ActOnOpenMPMapClause(
         MapTypeModifiers, MapTypeModifiersLoc, ReductionOrMapperIdScopeSpec,
         ReductionOrMapperId, MapType, IsMapTypeImplicit, DepLinMapLoc, ColonLoc,
-        VarList, StartLoc, LParenLoc, EndLoc);
+        VarList, OMPMappableExprListLocTy(StartLoc, LParenLoc, EndLoc));
     break;
   case OMPC_to:
     Res = ActOnOpenMPToClause(VarList, StartLoc, LParenLoc, EndLoc);
@@ -13386,9 +13385,8 @@ OMPClause *Sema::ActOnOpenMPMapClause(
     ArrayRef<SourceLocation> MapTypeModifiersLoc,
     CXXScopeSpec &MapperIdScopeSpec, DeclarationNameInfo &MapperId,
     OpenMPMapClauseKind MapType, bool IsMapTypeImplicit, SourceLocation MapLoc,
-    SourceLocation ColonLoc, ArrayRef<Expr *> VarList, SourceLocation StartLoc,
-    SourceLocation LParenLoc, SourceLocation EndLoc,
-    ArrayRef<Expr *> UnresolvedMappers) {
+    SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
+    OMPMappableExprListLocTy Locs, ArrayRef<Expr *> UnresolvedMappers) {
   OpenMPMapModifierKind Modifiers[] = {OMPC_MAP_MODIFIER_unknown,
                                        OMPC_MAP_MODIFIER_unknown,
                                        OMPC_MAP_MODIFIER_unknown};
@@ -13417,17 +13415,17 @@ OMPClause *Sema::ActOnOpenMPMapClause(
   }
 
   MappableVarListInfo MVLI(VarList);
-  checkMappableExpressionList(*this, DSAStack, OMPC_map, MVLI, StartLoc,
+  checkMappableExpressionList(*this, DSAStack, OMPC_map, MVLI, Locs.StartLoc,
                               MapType, IsMapTypeImplicit, &MapperIdScopeSpec,
                               &MapperId, UnresolvedMappers);
 
   // We need to produce a map clause even if we don't have variables so that
   // other diagnostics related with non-existing map clauses are accurate.
-  return OMPMapClause::Create(
-      Context, StartLoc, LParenLoc, EndLoc, MVLI.ProcessedVarList,
-      MVLI.VarBaseDeclarations, MVLI.VarComponents, MVLI.UDMapperList,
-      Modifiers, ModifiersLoc, MapperIdScopeSpec.getWithLocInContext(Context),
-      MapperId, MapType, IsMapTypeImplicit, MapLoc);
+  return OMPMapClause::Create(Context, Locs, MVLI.ProcessedVarList,
+                              MVLI.VarBaseDeclarations, MVLI.VarComponents,
+                              MVLI.UDMapperList, Modifiers, ModifiersLoc,
+                              MapperIdScopeSpec.getWithLocInContext(Context),
+                              MapperId, MapType, IsMapTypeImplicit, MapLoc);
 }
 
 QualType Sema::ActOnOpenMPDeclareReductionType(SourceLocation TyLoc,

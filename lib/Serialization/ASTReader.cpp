@@ -11784,7 +11784,7 @@ OMPClause *OMPClauseReader::readClause() {
     C = new (Context) OMPDeviceClause();
     break;
   case OMPC_map: {
-    OMPMapClause::OMPMappableExprListSizeTy Sizes;
+    OMPMappableExprListSizeTy Sizes;
     Sizes.NumVars = Record.readInt();
     Sizes.NumUniqueDeclarations = Record.readInt();
     Sizes.NumComponentLists = Record.readInt();
