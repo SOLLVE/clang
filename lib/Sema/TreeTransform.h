@@ -1805,13 +1805,15 @@ public:
   ///
   /// By default, performs semantic analysis to build the new OpenMP clause.
   /// Subclasses may override this routine to provide different behavior.
-  OMPClause *RebuildOMPMapClause(
-      ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
-      ArrayRef<SourceLocation> MapTypeModifiersLoc,
-      CXXScopeSpec MapperIdScopeSpec, DeclarationNameInfo MapperId,
-      OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
-      SourceLocation MapLoc, SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
-      OMPMappableExprListLocTy Locs, ArrayRef<Expr *> UnresolvedMappers) {
+  OMPClause *
+  RebuildOMPMapClause(ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
+                      ArrayRef<SourceLocation> MapTypeModifiersLoc,
+                      CXXScopeSpec MapperIdScopeSpec,
+                      DeclarationNameInfo MapperId, OpenMPMapClauseKind MapType,
+                      bool IsMapTypeImplicit, SourceLocation MapLoc,
+                      SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
+                      const OMPMappableExprListLocTy &Locs,
+                      ArrayRef<Expr *> UnresolvedMappers) {
     return getSema().ActOnOpenMPMapClause(MapTypeModifiers, MapTypeModifiersLoc,
                                           MapperIdScopeSpec, MapperId, MapType,
                                           IsMapTypeImplicit, MapLoc, ColonLoc,
@@ -1902,7 +1904,7 @@ public:
   /// By default, performs semantic analysis to build the new statement.
   /// Subclasses may override this routine to provide different behavior.
   OMPClause *RebuildOMPToClause(ArrayRef<Expr *> VarList,
-                                OMPMappableExprListLocTy Locs) {
+                                const OMPMappableExprListLocTy &Locs) {
     return getSema().ActOnOpenMPToClause(VarList, Locs);
   }
 
@@ -1911,7 +1913,7 @@ public:
   /// By default, performs semantic analysis to build the new statement.
   /// Subclasses may override this routine to provide different behavior.
   OMPClause *RebuildOMPFromClause(ArrayRef<Expr *> VarList,
-                                  OMPMappableExprListLocTy Locs) {
+                                  const OMPMappableExprListLocTy &Locs) {
     return getSema().ActOnOpenMPFromClause(VarList, Locs);
   }
 
@@ -1919,8 +1921,9 @@ public:
   ///
   /// By default, performs semantic analysis to build the new OpenMP clause.
   /// Subclasses may override this routine to provide different behavior.
-  OMPClause *RebuildOMPUseDevicePtrClause(ArrayRef<Expr *> VarList,
-                                          OMPMappableExprListLocTy Locs) {
+  OMPClause *
+  RebuildOMPUseDevicePtrClause(ArrayRef<Expr *> VarList,
+                               const OMPMappableExprListLocTy &Locs) {
     return getSema().ActOnOpenMPUseDevicePtrClause(VarList, Locs);
   }
 
@@ -1929,7 +1932,7 @@ public:
   /// By default, performs semantic analysis to build the new OpenMP clause.
   /// Subclasses may override this routine to provide different behavior.
   OMPClause *RebuildOMPIsDevicePtrClause(ArrayRef<Expr *> VarList,
-                                         OMPMappableExprListLocTy Locs) {
+                                         const OMPMappableExprListLocTy &Locs) {
     return getSema().ActOnOpenMPIsDevicePtrClause(VarList, Locs);
   }
 

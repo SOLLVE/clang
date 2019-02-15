@@ -156,7 +156,7 @@ namespace clang {
   class OMPDeclareReductionDecl;
   class OMPDeclareSimdDecl;
   class OMPClause;
-  class OMPMappableExprListLocTy;
+  struct OMPMappableExprListLocTy;
   struct OverloadCandidate;
   class OverloadCandidateSet;
   class OverloadExpr;
@@ -9427,15 +9427,14 @@ public:
                                      SourceLocation LParenLoc,
                                      SourceLocation EndLoc);
   /// Called on well-formed 'map' clause.
-  OMPClause *
-  ActOnOpenMPMapClause(ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
-                       ArrayRef<SourceLocation> MapTypeModifiersLoc,
-                       CXXScopeSpec &MapperIdScopeSpec,
-                       DeclarationNameInfo &MapperId,
-                       OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
-                       SourceLocation MapLoc, SourceLocation ColonLoc,
-                       ArrayRef<Expr *> VarList, OMPMappableExprListLocTy Locs,
-                       ArrayRef<Expr *> UnresolvedMappers = llvm::None);
+  OMPClause *ActOnOpenMPMapClause(
+      ArrayRef<OpenMPMapModifierKind> MapTypeModifiers,
+      ArrayRef<SourceLocation> MapTypeModifiersLoc,
+      CXXScopeSpec &MapperIdScopeSpec, DeclarationNameInfo &MapperId,
+      OpenMPMapClauseKind MapType, bool IsMapTypeImplicit,
+      SourceLocation MapLoc, SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
+      const OMPMappableExprListLocTy &Locs,
+      ArrayRef<Expr *> UnresolvedMappers = llvm::None);
   /// Called on well-formed 'num_teams' clause.
   OMPClause *ActOnOpenMPNumTeamsClause(Expr *NumTeams, SourceLocation StartLoc,
                                        SourceLocation LParenLoc,
@@ -9461,16 +9460,17 @@ public:
       SourceLocation KindLoc, SourceLocation EndLoc);
   /// Called on well-formed 'to' clause.
   OMPClause *ActOnOpenMPToClause(ArrayRef<Expr *> VarList,
-                                 OMPMappableExprListLocTy Locs);
+                                 const OMPMappableExprListLocTy &Locs);
   /// Called on well-formed 'from' clause.
   OMPClause *ActOnOpenMPFromClause(ArrayRef<Expr *> VarList,
-                                   OMPMappableExprListLocTy Locs);
+                                   const OMPMappableExprListLocTy &Locs);
   /// Called on well-formed 'use_device_ptr' clause.
-  OMPClause *ActOnOpenMPUseDevicePtrClause(ArrayRef<Expr *> VarList,
-                                           OMPMappableExprListLocTy Locs);
+  OMPClause *
+  ActOnOpenMPUseDevicePtrClause(ArrayRef<Expr *> VarList,
+                                const OMPMappableExprListLocTy &Locs);
   /// Called on well-formed 'is_device_ptr' clause.
   OMPClause *ActOnOpenMPIsDevicePtrClause(ArrayRef<Expr *> VarList,
-                                          OMPMappableExprListLocTy Locs);
+                                          const OMPMappableExprListLocTy &Locs);
 
   /// The kind of conversion being performed.
   enum CheckedConversionKind {
