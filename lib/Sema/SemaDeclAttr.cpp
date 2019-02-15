@@ -5249,11 +5249,22 @@ static void handleObjCBridgeRelatedAttr(Sema &S, Decl *D,
 
 static void handleObjCDesignatedInitializer(Sema &S, Decl *D,
                                             const ParsedAttr &AL) {
+  DeclContext *Ctx = D->getDeclContext();
+
+  // This attribute can only be applied to methods in interfaces or class
+  // extensions.
+  if (!isa<ObjCInterfaceDecl>(Ctx) &&
+      !(isa<ObjCCategoryDecl>(Ctx) &&
+        cast<ObjCCategoryDecl>(Ctx)->IsClassExtension())) {
+    S.Diag(D->getLocation(), diag::err_designated_init_attr_non_init);
+    return;
+  }
+
   ObjCInterfaceDecl *IFace;
-  if (auto *CatDecl = dyn_cast<ObjCCategoryDecl>(D->getDeclContext()))
+  if (auto *CatDecl = dyn_cast<ObjCCategoryDecl>(Ctx))
     IFace = CatDecl->getClassInterface();
   else
-    IFace = cast<ObjCInterfaceDecl>(D->getDeclContext());
+    IFace = cast<ObjCInterfaceDecl>(Ctx);
 
   if (!IFace)
     return;
@@ -6313,7 +6324,9 @@ static void handleOpenCLAccessAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   if (const auto *PDecl = dyn_cast<ParmVarDecl>(D)) {
     const Type *DeclTy = PDecl->getType().getCanonicalType().getTypePtr();
     if (AL.getName()->getName().find("read_write") != StringRef::npos) {
-      if (S.getLangOpts().OpenCLVersion < 200 || DeclTy->isPipeType()) {
+      if ((!S.getLangOpts().OpenCLCPlusPlus &&
+           S.getLangOpts().OpenCLVersion < 200) ||
+          DeclTy->isPipeType()) {
         S.Diag(AL.getLoc(), diag::err_opencl_invalid_read_write)
             << AL << PDecl->getType() << DeclTy->isImageType();
         D->setInvalidDecl(true);
@@ -7242,6 +7255,17 @@ void Sema::ProcessDeclAttributeList(Scope *S, Decl *D,
         D->setInvalidDecl();
       }
     }
+  }
+
+  // Do this check after processing D's attributes because the attribute
+  // objc_method_family can change whether the given method is in the init
+  // family, and it can be applied after objc_designated_initializer. This is a
+  // bit of a hack, but we need it to be compatible with versions of clang that
+  // processed the attribute list in the wrong order.
+  if (D->hasAttr<ObjCDesignatedInitializerAttr>() &&
+      cast<ObjCMethodDecl>(D)->getMethodFamily() != OMF_init) {
+    Diag(D->getLocation(), diag::err_designated_init_attr_non_init);
+    D->dropAttr<ObjCDesignatedInitializerAttr>();
   }
 }
 
