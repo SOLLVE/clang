@@ -2277,7 +2277,7 @@ OMPClause *Parser::ParseOpenMPVarListClause(OpenMPDirectiveKind DKind,
     return nullptr;
   OMPVarListLocTy Locs(Loc, LOpen, Data.RLoc);
   return Actions.ActOnOpenMPVarListClause(
-      Kind, Vars, Data.TailExpr, Data.ColonLoc,
+      Kind, Vars, Data.TailExpr, Locs, Data.ColonLoc,
       Data.ReductionOrMapperIdScopeSpec, Data.ReductionOrMapperId, Data.DepKind,
       Data.LinKind, Data.MapTypeModifiers, Data.MapTypeModifiersLoc,
       Data.MapType, Data.IsMapTypeImplicit, Data.DepLinMapLoc);
