@@ -9807,7 +9807,8 @@ OMPClause *Sema::ActOnOpenMPVarListClause(
         VarList, OMPMappableExprListLocTy(StartLoc, LParenLoc, EndLoc));
     break;
   case OMPC_use_device_ptr:
-    Res = ActOnOpenMPUseDevicePtrClause(VarList, StartLoc, LParenLoc, EndLoc);
+    Res = ActOnOpenMPUseDevicePtrClause(
+        VarList, OMPMappableExprListLocTy(StartLoc, LParenLoc, EndLoc));
     break;
   case OMPC_is_device_ptr:
     Res = ActOnOpenMPIsDevicePtrClause(
@@ -14191,9 +14192,7 @@ OMPClause *Sema::ActOnOpenMPFromClause(ArrayRef<Expr *> VarList,
 }
 
 OMPClause *Sema::ActOnOpenMPUseDevicePtrClause(ArrayRef<Expr *> VarList,
-                                               SourceLocation StartLoc,
-                                               SourceLocation LParenLoc,
-                                               SourceLocation EndLoc) {
+                                               OMPMappableExprListLocTy Locs) {
   MappableVarListInfo MVLI(VarList);
   SmallVector<Expr *, 8> PrivateCopies;
   SmallVector<Expr *, 8> Inits;
@@ -14273,8 +14272,8 @@ OMPClause *Sema::ActOnOpenMPUseDevicePtrClause(ArrayRef<Expr *> VarList,
     return nullptr;
 
   return OMPUseDevicePtrClause::Create(
-      Context, StartLoc, LParenLoc, EndLoc, MVLI.ProcessedVarList,
-      PrivateCopies, Inits, MVLI.VarBaseDeclarations, MVLI.VarComponents);
+      Context, Locs, MVLI.ProcessedVarList, PrivateCopies, Inits,
+      MVLI.VarBaseDeclarations, MVLI.VarComponents);
 }
 
 OMPClause *Sema::ActOnOpenMPIsDevicePtrClause(ArrayRef<Expr *> VarList,

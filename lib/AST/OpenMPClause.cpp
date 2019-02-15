@@ -948,15 +948,15 @@ void OMPUseDevicePtrClause::setInits(ArrayRef<Expr *> VL) {
 }
 
 OMPUseDevicePtrClause *OMPUseDevicePtrClause::Create(
-    const ASTContext &C, SourceLocation StartLoc, SourceLocation LParenLoc,
-    SourceLocation EndLoc, ArrayRef<Expr *> Vars, ArrayRef<Expr *> PrivateVars,
-    ArrayRef<Expr *> Inits, ArrayRef<ValueDecl *> Declarations,
+    const ASTContext &C, OMPMappableExprListLocTy Locs, ArrayRef<Expr *> Vars,
+    ArrayRef<Expr *> PrivateVars, ArrayRef<Expr *> Inits,
+    ArrayRef<ValueDecl *> Declarations,
     MappableExprComponentListsRef ComponentLists) {
-  unsigned NumVars = Vars.size();
-  unsigned NumUniqueDeclarations =
-      getUniqueDeclarationsTotalNumber(Declarations);
-  unsigned NumComponentLists = ComponentLists.size();
-  unsigned NumComponents = getComponentsTotalNumber(ComponentLists);
+  OMPMappableExprListSizeTy Sizes;
+  Sizes.NumVars = Vars.size();
+  Sizes.NumUniqueDeclarations = getUniqueDeclarationsTotalNumber(Declarations);
+  Sizes.NumComponentLists = ComponentLists.size();
+  Sizes.NumComponents = getComponentsTotalNumber(ComponentLists);
 
   // We need to allocate:
   // 3 x NumVars x Expr* - we have an original list expression for each clause
@@ -971,12 +971,11 @@ OMPUseDevicePtrClause *OMPUseDevicePtrClause::Create(
   void *Mem = C.Allocate(
       totalSizeToAlloc<Expr *, ValueDecl *, unsigned,
                        OMPClauseMappableExprCommon::MappableComponent>(
-          3 * NumVars, NumUniqueDeclarations,
-          NumUniqueDeclarations + NumComponentLists, NumComponents));
+          3 * Sizes.NumVars, Sizes.NumUniqueDeclarations,
+          Sizes.NumUniqueDeclarations + Sizes.NumComponentLists,
+          Sizes.NumComponents));
 
-  OMPUseDevicePtrClause *Clause = new (Mem) OMPUseDevicePtrClause(
-      StartLoc, LParenLoc, EndLoc, NumVars, NumUniqueDeclarations,
-      NumComponentLists, NumComponents);
+  OMPUseDevicePtrClause *Clause = new (Mem) OMPUseDevicePtrClause(Locs, Sizes);
 
   Clause->setVarRefs(Vars);
   Clause->setPrivateCopies(PrivateVars);
@@ -985,16 +984,16 @@ OMPUseDevicePtrClause *OMPUseDevicePtrClause::Create(
   return Clause;
 }
 
-OMPUseDevicePtrClause *OMPUseDevicePtrClause::CreateEmpty(
-    const ASTContext &C, unsigned NumVars, unsigned NumUniqueDeclarations,
-    unsigned NumComponentLists, unsigned NumComponents) {
+OMPUseDevicePtrClause *
+OMPUseDevicePtrClause::CreateEmpty(const ASTContext &C,
+                                   OMPMappableExprListSizeTy Sizes) {
   void *Mem = C.Allocate(
       totalSizeToAlloc<Expr *, ValueDecl *, unsigned,
                        OMPClauseMappableExprCommon::MappableComponent>(
-          3 * NumVars, NumUniqueDeclarations,
-          NumUniqueDeclarations + NumComponentLists, NumComponents));
-  return new (Mem) OMPUseDevicePtrClause(NumVars, NumUniqueDeclarations,
-                                         NumComponentLists, NumComponents);
+          3 * Sizes.NumVars, Sizes.NumUniqueDeclarations,
+          Sizes.NumUniqueDeclarations + Sizes.NumComponentLists,
+          Sizes.NumComponents));
+  return new (Mem) OMPUseDevicePtrClause(Sizes);
 }
 
 OMPIsDevicePtrClause *
