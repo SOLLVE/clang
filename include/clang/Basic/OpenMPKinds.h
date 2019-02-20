@@ -105,6 +105,14 @@ enum OpenMPMapModifierKind {
   OMPC_MAP_MODIFIER_last
 };
 
+/// OpenMP modifier kind for 'to' and 'from' clause.
+enum OpenMPToFromModifierKind {
+#define OPENMP_TO_FROM_MODIFIER_KIND(Name) \
+  OMPC_TO_FROM_MODIFIER_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_TO_FROM_MODIFIER_unknown
+};
+
 /// OpenMP attributes for 'dist_schedule' clause.
 enum OpenMPDistScheduleClauseKind {
 #define OPENMP_DIST_SCHEDULE_KIND(Name) OMPC_DIST_SCHEDULE_##Name,
