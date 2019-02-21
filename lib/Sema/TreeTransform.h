@@ -8825,6 +8825,7 @@ bool transformOMPMappableExprListClause(
     llvm::SmallVector<Expr *, 16> &Vars, CXXScopeSpec &MapperIdScopeSpec,
     DeclarationNameInfo &MapperIdInfo,
     llvm::SmallVector<Expr *, 16> &UnresolvedMappers) {
+  // Transform expressions in the list.
   Vars.reserve(C->varlist_size());
   for (auto *VE : C->varlists()) {
     ExprResult EVar = TT.getDerived().TransformExpr(cast<Expr>(VE));
@@ -8882,52 +8883,6 @@ OMPClause *TreeTransform<Derived>::TransformOMPMapClause(OMPMapClause *C) {
   if (transformOMPMappableExprListClause<Derived, OMPMapClause>(
           *this, C, Vars, MapperIdScopeSpec, MapperIdInfo, UnresolvedMappers))
     return nullptr;
-
-  //llvm::SmallVector<Expr *, 16> Vars;
-  //Vars.reserve(C->varlist_size());
-  //for (auto *VE : C->varlists()) {
-  //  ExprResult EVar = getDerived().TransformExpr(cast<Expr>(VE));
-  //  if (EVar.isInvalid())
-  //    return nullptr;
-  //  Vars.push_back(EVar.get());
-  //}
-  //NestedNameSpecifierLoc QualifierLoc;
-  //if (C->getMapperQualifierLoc()) {
-  //  QualifierLoc = getDerived().TransformNestedNameSpecifierLoc(
-  //      C->getMapperQualifierLoc());
-  //  if (!QualifierLoc)
-  //    return nullptr;
-  //}
-  //CXXScopeSpec MapperIdScopeSpec;
-  //MapperIdScopeSpec.Adopt(QualifierLoc);
-  //DeclarationNameInfo MapperIdInfo = C->getMapperIdInfo();
-  //if (MapperIdInfo.getName()) {
-  //  MapperIdInfo = getDerived().TransformDeclarationNameInfo(MapperIdInfo);
-  //  if (!MapperIdInfo.getName())
-  //    return nullptr;
-  //}
-  //// Build a list of all candidate OMPDeclareMapperDecls, which is provided by
-  //// the previous user-defined mapper lookup in dependent environment.
-  //llvm::SmallVector<Expr *, 16> UnresolvedMappers;
-  //for (auto *E : C->mapperlists()) {
-  //  // Transform all the decls.
-  //  if (E) {
-  //    auto *ULE = cast<UnresolvedLookupExpr>(E);
-  //    UnresolvedSet<8> Decls;
-  //    for (auto *D : ULE->decls()) {
-  //      NamedDecl *InstD =
-  //          cast<NamedDecl>(getDerived().TransformDecl(E->getExprLoc(), D));
-  //      Decls.addDecl(InstD, InstD->getAccess());
-  //    }
-  //    UnresolvedMappers.push_back(UnresolvedLookupExpr::Create(
-  //        SemaRef.Context, /*NamingClass=*/nullptr,
-  //        MapperIdScopeSpec.getWithLocInContext(SemaRef.Context), MapperIdInfo,
-  //        /*ADL=*/false, ULE->isOverloaded(), Decls.begin(), Decls.end()));
-  //  } else {
-  //    UnresolvedMappers.push_back(nullptr);
-  //  }
-  //}
-  //OMPVarListLocTy Locs(C->getBeginLoc(), C->getLParenLoc(), C->getEndLoc());
   return getDerived().RebuildOMPMapClause(
       C->getMapTypeModifiers(), C->getMapTypeModifiersLoc(), MapperIdScopeSpec,
       MapperIdInfo, C->getMapType(), C->isImplicitMapType(), C->getMapLoc(),

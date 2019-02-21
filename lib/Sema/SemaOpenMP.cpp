@@ -13142,7 +13142,7 @@ struct MappableVarListInfo {
 static void checkMappableExpressionList(
     Sema &SemaRef, DSAStackTy *DSAS, OpenMPClauseKind CKind,
     MappableVarListInfo &MVLI, SourceLocation StartLoc,
-    CXXScopeSpec &MapperIdScopeSpec, DeclarationNameInfo &MapperId,
+    CXXScopeSpec &MapperIdScopeSpec, DeclarationNameInfo MapperId,
     ArrayRef<Expr *> UnresolvedMappers,
     OpenMPMapClauseKind MapType = OMPC_MAP_unknown,
     bool IsMapTypeImplicit = false) {
@@ -13151,6 +13151,9 @@ static void checkMappableExpressionList(
          "Unexpected clause kind with mappable expressions!");
 
   // If the identifier of user-defined mapper is not specified, it is "default".
+  // We do not change the actual name in this clause to distinguish whether a
+  // mapper is specified explicitly, i.e., it is not explicitly specified when
+  // MapperId.getName() is empty.
   if (!MapperId.getName() || MapperId.getName().isEmpty()) {
     auto &DeclNames = SemaRef.getASTContext().DeclarationNames;
     MapperId.setName(DeclNames.getIdentifier(
@@ -14168,8 +14171,10 @@ OMPClause *Sema::ActOnOpenMPToClause(ArrayRef<Expr *> VarList,
   if (MVLI.ProcessedVarList.empty())
     return nullptr;
 
-  return OMPToClause::Create(Context, Locs, MVLI.ProcessedVarList,
-                             MVLI.VarBaseDeclarations, MVLI.VarComponents);
+  return OMPToClause::Create(
+      Context, Locs, MVLI.ProcessedVarList, MVLI.VarBaseDeclarations,
+      MVLI.VarComponents, MVLI.UDMapperList,
+      MapperIdScopeSpec.getWithLocInContext(Context), MapperId);
 }
 
 OMPClause *Sema::ActOnOpenMPFromClause(ArrayRef<Expr *> VarList,
@@ -14183,8 +14188,10 @@ OMPClause *Sema::ActOnOpenMPFromClause(ArrayRef<Expr *> VarList,
   if (MVLI.ProcessedVarList.empty())
     return nullptr;
 
-  return OMPFromClause::Create(Context, Locs, MVLI.ProcessedVarList,
-                               MVLI.VarBaseDeclarations, MVLI.VarComponents);
+  return OMPFromClause::Create(
+      Context, Locs, MVLI.ProcessedVarList, MVLI.VarBaseDeclarations,
+      MVLI.VarComponents, MVLI.UDMapperList,
+      MapperIdScopeSpec.getWithLocInContext(Context), MapperId);
 }
 
 OMPClause *Sema::ActOnOpenMPUseDevicePtrClause(ArrayRef<Expr *> VarList,
