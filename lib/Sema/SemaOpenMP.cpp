@@ -13352,7 +13352,6 @@ static void checkMappableExpressionList(
           continue;
         }
       }
-
     }
 
     // Try to find the associated user-defined mapper.

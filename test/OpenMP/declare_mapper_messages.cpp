@@ -96,7 +96,7 @@ int fun(int arg) {
 #pragma omp target update to(mapper(N1:: :vv)                           // expected-error {{illegal OpenMP user-defined mapper identifier}} expected-error {{expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'}}
 #pragma omp target update to(mapper(N1::aa) :vv)                        // expected-error {{cannot find a valid user-defined mapper for type 'vec' with name 'aa'}} expected-error {{expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'}}
 #pragma omp target update to(mapper(ab):vv)                             // expected-error {{cannot find a valid user-defined mapper for type 'vec' with name 'ab'}} expected-error {{expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'}}
-#pragma omp target update to(mapper(aa) a:vv)                           // expected-warning {{missing ':' after mapper(...) - ignoring}}
+#pragma omp target update to(mapper(aa) a:vv)                           // expected-warning {{missing ':' after ) - ignoring}}
 #pragma omp target update to(mapper(aa):vv)
 #pragma omp target update to(mapper(N1::stack<int>::id) :vv)
 
@@ -109,7 +109,7 @@ int fun(int arg) {
 #pragma omp target update from(mapper(N1:: :vv)                         // expected-error {{illegal OpenMP user-defined mapper identifier}} expected-error {{expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'}}
 #pragma omp target update from(mapper(N1::aa) :vv)                      // expected-error {{cannot find a valid user-defined mapper for type 'vec' with name 'aa'}} expected-error {{expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'}}
 #pragma omp target update from(mapper(ab):vv)                           // expected-error {{cannot find a valid user-defined mapper for type 'vec' with name 'ab'}} expected-error {{expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'}}
-#pragma omp target update from(mapper(aa) a:vv)                         // expected-warning {{missing ':' after mapper(...) - ignoring}}
+#pragma omp target update from(mapper(aa) a:vv)                         // expected-warning {{missing ':' after ) - ignoring}}
 #pragma omp target update from(mapper(aa):vv)
 #pragma omp target update from(mapper(N1::stack<int>::id) :vv)
     }

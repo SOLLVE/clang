@@ -873,8 +873,7 @@ OMPToClause *OMPToClause::Create(
           Sizes.NumUniqueDeclarations + Sizes.NumComponentLists,
           Sizes.NumComponents));
 
-  OMPToClause *Clause =
-      new (Mem) OMPToClause(UDMQualifierLoc, MapperId, Locs, Sizes);
+  auto *Clause = new (Mem) OMPToClause(UDMQualifierLoc, MapperId, Locs, Sizes);
 
   Clause->setVarRefs(Vars);
   Clause->setUDMapperRefs(UDMapperRefs);
@@ -921,7 +920,7 @@ OMPFromClause *OMPFromClause::Create(
           Sizes.NumUniqueDeclarations + Sizes.NumComponentLists,
           Sizes.NumComponents));
 
-  OMPFromClause *Clause =
+  auto *Clause =
       new (Mem) OMPFromClause(UDMQualifierLoc, MapperId, Locs, Sizes);
 
   Clause->setVarRefs(Vars);

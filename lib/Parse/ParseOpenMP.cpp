@@ -2151,9 +2151,8 @@ bool Parser::ParseOpenMPVarList(OpenMPDirectiveKind DKind,
       IsInvalidMapperModifier = parseMapTypeModifiers(Data);
       if (!IsInvalidMapperModifier)
         parseMapType(*this, Data);
-      else {
+      else
         SkipUntil(tok::colon, tok::annot_pragma_openmp_end, StopBeforeMatch);
-      }
     }
     if (Data.MapType == OMPC_MAP_unknown) {
       Data.MapType = OMPC_MAP_tofrom;
@@ -2164,15 +2163,25 @@ bool Parser::ParseOpenMPVarList(OpenMPDirectiveKind DKind,
       Data.ColonLoc = ConsumeToken();
   } else if (Kind == OMPC_to || Kind == OMPC_from) {
     if (Tok.is(tok::identifier)) {
-      OpenMPToFromModifierKind Modifier = static_cast<OpenMPToFromModifierKind>(
-          getOpenMPSimpleClauseType(Kind, PP.getSpelling(Tok)));
-      if (Modifier == OMPC_TO_FROM_MODIFIER_mapper) {
+      bool IsMapperModifier = false;
+      if (Kind == OMPC_to) {
+        auto Modifier = static_cast<OpenMPToModifierKind>(
+            getOpenMPSimpleClauseType(Kind, PP.getSpelling(Tok)));
+        if (Modifier == OMPC_TO_MODIFIER_mapper)
+          IsMapperModifier = true;
+      } else {
+        auto Modifier = static_cast<OpenMPFromModifierKind>(
+            getOpenMPSimpleClauseType(Kind, PP.getSpelling(Tok)));
+        if (Modifier == OMPC_FROM_MODIFIER_mapper)
+          IsMapperModifier = true;
+      }
+      if (IsMapperModifier) {
         // Parse the mapper modifier.
         ConsumeToken();
         IsInvalidMapperModifier = parseMapperModifier(Data);
         if (Tok.isNot(tok::colon)) {
           if (!IsInvalidMapperModifier)
-            Diag(Tok, diag::warn_pragma_expected_colon) << "mapper(...)";
+            Diag(Tok, diag::warn_pragma_expected_colon) << ")";
           SkipUntil(tok::colon, tok::r_paren, tok::annot_pragma_openmp_end,
                     StopBeforeMatch);
         }
