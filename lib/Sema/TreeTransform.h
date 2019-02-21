@@ -8853,7 +8853,6 @@ bool transformOMPMappableExprListClause(
   for (auto *E : C->mapperlists()) {
     // Transform all the decls.
     if (E) {
-      E->dump();
       auto *ULE = cast<UnresolvedLookupExpr>(E);
       UnresolvedSet<8> Decls;
       for (auto *D : ULE->decls()) {

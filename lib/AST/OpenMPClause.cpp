@@ -1457,7 +1457,7 @@ void OMPClausePrinter::VisitOMPToClause(OMPToClause *Node) {
           Node->getMapperQualifierLoc().getNestedNameSpecifier();
       if (MapperNNS)
         MapperNNS->print(OS, Policy);
-      OS << MapperId << ") :";
+      OS << MapperId << "):";
       VisitOMPClauseList(Node, ' ');
     } else {
       VisitOMPClauseList(Node, '(');
@@ -1477,7 +1477,7 @@ void OMPClausePrinter::VisitOMPFromClause(OMPFromClause *Node) {
           Node->getMapperQualifierLoc().getNestedNameSpecifier();
       if (MapperNNS)
         MapperNNS->print(OS, Policy);
-      OS << MapperId << ") :";
+      OS << MapperId << "):";
       VisitOMPClauseList(Node, ' ');
     } else {
       VisitOMPClauseList(Node, '(');

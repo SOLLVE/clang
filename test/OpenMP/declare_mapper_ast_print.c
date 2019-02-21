@@ -49,7 +49,7 @@ int main() {
 // CHECK: #pragma omp target map(mapper(default),from: dd[0:10])
     { dd[0].i++; }
 #pragma omp target update to(mapper(id): vv) from(mapper(default): dd[0:10])
-// CHHECK: #pragma omp target update to(mapper(id): vv) from(mapper(default): dd[0:10])
+// CHECK: #pragma omp target update to(mapper(id): vv) from(mapper(default): dd[0:10])
   }
   return 0;
 }
