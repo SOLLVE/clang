@@ -1964,7 +1964,8 @@ bool Parser::parseMapperModifier(OpenMPVarListDataTy &Data) {
   // Parse '('.
   BalancedDelimiterTracker T(*this, tok::l_paren, tok::colon);
   if (T.expectAndConsume(diag::err_expected_lparen_after, "mapper")) {
-    SkipUntil(tok::colon, tok::annot_pragma_openmp_end, StopBeforeMatch);
+    SkipUntil(tok::colon, tok::r_paren, tok::annot_pragma_openmp_end,
+              StopBeforeMatch);
     return true;
   }
   // Parse mapper-identifier
@@ -1974,7 +1975,8 @@ bool Parser::parseMapperModifier(OpenMPVarListDataTy &Data) {
                                    /*EnteringContext=*/false);
   if (Tok.isNot(tok::identifier) && Tok.isNot(tok::kw_default)) {
     Diag(Tok.getLocation(), diag::err_omp_mapper_illegal_identifier);
-    SkipUntil(tok::colon, tok::annot_pragma_openmp_end, StopBeforeMatch);
+    SkipUntil(tok::colon, tok::r_paren, tok::annot_pragma_openmp_end,
+              StopBeforeMatch);
     return true;
   }
   auto &DeclNames = Actions.getASTContext().DeclarationNames;
@@ -2149,6 +2151,9 @@ bool Parser::ParseOpenMPVarList(OpenMPDirectiveKind DKind,
       IsInvalidMapperModifier = parseMapTypeModifiers(Data);
       if (!IsInvalidMapperModifier)
         parseMapType(*this, Data);
+      else {
+        SkipUntil(tok::colon, tok::annot_pragma_openmp_end, StopBeforeMatch);
+      }
     }
     if (Data.MapType == OMPC_MAP_unknown) {
       Data.MapType = OMPC_MAP_tofrom;
@@ -2167,8 +2172,9 @@ bool Parser::ParseOpenMPVarList(OpenMPDirectiveKind DKind,
         IsInvalidMapperModifier = parseMapperModifier(Data);
         if (Tok.isNot(tok::colon)) {
           if (!IsInvalidMapperModifier)
-            Diag(Tok, diag::warn_pragma_expected_colon) << Tok.getLocation();
-          SkipUntil(tok::colon, tok::annot_pragma_openmp_end);
+            Diag(Tok, diag::warn_pragma_expected_colon) << "mapper(...)";
+          SkipUntil(tok::colon, tok::r_paren, tok::annot_pragma_openmp_end,
+                    StopBeforeMatch);
         }
         // Consume ':'.
         if (Tok.is(tok::colon))
