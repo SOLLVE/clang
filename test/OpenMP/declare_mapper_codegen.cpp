@@ -30,10 +30,10 @@ public:
 
 // CHECK: [[SIZES:@.+]] = {{.+}}constant [1 x i[[sz:64|32]]] [i{{64|32}} 4]
 // CHECK: [[TYPES:@.+]] = {{.+}}constant [1 x i64] [i64 35]
-// CHECK: [[FSIZES:@.+]] = {{.+}}constant [1 x i[[sz]]] [i[[sz]] 4]
-// CHECK: [[FTYPES:@.+]] = {{.+}}constant [1 x i64] [i64 34]
 // CHECK: [[TSIZES:@.+]] = {{.+}}constant [1 x i[[sz]]] [i[[sz]] 4]
 // CHECK: [[TTYPES:@.+]] = {{.+}}constant [1 x i64] [i64 33]
+// CHECK: [[FSIZES:@.+]] = {{.+}}constant [1 x i[[sz]]] [i[[sz]] 4]
+// CHECK: [[FTYPES:@.+]] = {{.+}}constant [1 x i64] [i64 34]
 
 // CHECK-LABEL: foo{{.*}}(
 void foo(int a){
