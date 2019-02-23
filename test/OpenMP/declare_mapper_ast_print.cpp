@@ -131,14 +131,17 @@ int main() {
 #pragma omp target map(mapper(default) tofrom: dd)
 // CHECK: #pragma omp target map(mapper(default),tofrom: dd)
   { dd.d++; }
+
 #pragma omp target update to(mapper(N1::id) : vc)
 // CHECK: #pragma omp target update to(mapper(N1::id): vc)
-#pragma omp target update from(mapper(N1::id) : vc)
-// CHECK: #pragma omp target update from(mapper(N1::id): vc)
 #pragma omp target update to(mapper(dat<double>::id): vvv)
 // CHECK: #pragma omp target update to(mapper(dat<double>::id): vvv)
+
+#pragma omp target update from(mapper(N1::id) : vc)
+// CHECK: #pragma omp target update from(mapper(N1::id): vc)
 #pragma omp target update from(mapper(dat<double>::id): vvv)
 // CHECK: #pragma omp target update from(mapper(dat<double>::id): vvv)
+
 #pragma omp declare mapper(id: N1::vec v) map(v.len)
 // CHECK: #pragma omp declare mapper (id : N1::vec v) map(tofrom: v.len)
   {

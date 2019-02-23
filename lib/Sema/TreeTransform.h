@@ -8822,9 +8822,9 @@ TreeTransform<Derived>::TransformOMPDeviceClause(OMPDeviceClause *C) {
 template <typename Derived, class T>
 bool transformOMPMappableExprListClause(
     TreeTransform<Derived> &TT, OMPMappableExprListClause<T> *C,
-    llvm::SmallVector<Expr *, 16> &Vars, CXXScopeSpec &MapperIdScopeSpec,
+    llvm::SmallVectorImpl<Expr *> &Vars, CXXScopeSpec &MapperIdScopeSpec,
     DeclarationNameInfo &MapperIdInfo,
-    llvm::SmallVector<Expr *, 16> &UnresolvedMappers) {
+    llvm::SmallVectorImpl<Expr *> &UnresolvedMappers) {
   // Transform expressions in the list.
   Vars.reserve(C->varlist_size());
   for (auto *VE : C->varlists()) {

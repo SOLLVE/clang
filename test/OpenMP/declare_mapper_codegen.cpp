@@ -56,17 +56,6 @@ void foo(int a){
    ++c.a;
   }
 
-  // CHECK-DAG: call void @__tgt_target_data_update(i64 -1, i32 1, i8** [[FGEPBP:%.+]], i8** [[FGEPP:%.+]], i[[sz]]* getelementptr {{.+}}[1 x i[[sz]]]* [[FSIZES]], i32 0, i32 0), {{.+}}getelementptr {{.+}}[1 x i64]* [[FTYPES]]{{.+}})
-  // CHECK-DAG: [[FGEPBP]] = getelementptr inbounds {{.+}}[[FBP:%[^,]+]], i{{.+}} 0, i{{.+}} 0
-  // CHECK-DAG: [[FGEPP]] = getelementptr inbounds {{.+}}[[FP:%[^,]+]], i{{.+}} 0, i{{.+}} 0
-  // CHECK-DAG: [[FBP0:%.+]] = getelementptr inbounds {{.+}}[[FBP]], i{{.+}} 0, i{{.+}} 0
-  // CHECK-DAG: [[FP0:%.+]] = getelementptr inbounds {{.+}}[[FP]], i{{.+}} 0, i{{.+}} 0
-  // CHECK-DAG: [[FCBP0:%.+]] = bitcast i8** [[FBP0]] to %class.C**
-  // CHECK-DAG: [[FCP0:%.+]] = bitcast i8** [[FP0]] to %class.C**
-  // CHECK-DAG: store %class.C* [[VAL]], %class.C** [[FCBP0]]
-  // CHECK-DAG: store %class.C* [[VAL]], %class.C** [[FCP0]]
-  #pragma omp target update from(mapper(id): c)
-
   // CHECK-DAG: call void @__tgt_target_data_update(i64 -1, i32 1, i8** [[TGEPBP:%.+]], i8** [[TGEPP:%.+]], i[[sz]]* getelementptr {{.+}}[1 x i[[sz]]]* [[TSIZES]], i32 0, i32 0), {{.+}}getelementptr {{.+}}[1 x i64]* [[TTYPES]]{{.+}})
   // CHECK-DAG: [[TGEPBP]] = getelementptr inbounds {{.+}}[[TBP:%[^,]+]], i{{.+}} 0, i{{.+}} 0
   // CHECK-DAG: [[TGEPP]] = getelementptr inbounds {{.+}}[[TP:%[^,]+]], i{{.+}} 0, i{{.+}} 0
@@ -77,6 +66,17 @@ void foo(int a){
   // CHECK-DAG: store %class.C* [[VAL]], %class.C** [[TCBP0]]
   // CHECK-DAG: store %class.C* [[VAL]], %class.C** [[TCP0]]
   #pragma omp target update to(mapper(id): c)
+
+  // CHECK-DAG: call void @__tgt_target_data_update(i64 -1, i32 1, i8** [[FGEPBP:%.+]], i8** [[FGEPP:%.+]], i[[sz]]* getelementptr {{.+}}[1 x i[[sz]]]* [[FSIZES]], i32 0, i32 0), {{.+}}getelementptr {{.+}}[1 x i64]* [[FTYPES]]{{.+}})
+  // CHECK-DAG: [[FGEPBP]] = getelementptr inbounds {{.+}}[[FBP:%[^,]+]], i{{.+}} 0, i{{.+}} 0
+  // CHECK-DAG: [[FGEPP]] = getelementptr inbounds {{.+}}[[FP:%[^,]+]], i{{.+}} 0, i{{.+}} 0
+  // CHECK-DAG: [[FBP0:%.+]] = getelementptr inbounds {{.+}}[[FBP]], i{{.+}} 0, i{{.+}} 0
+  // CHECK-DAG: [[FP0:%.+]] = getelementptr inbounds {{.+}}[[FP]], i{{.+}} 0, i{{.+}} 0
+  // CHECK-DAG: [[FCBP0:%.+]] = bitcast i8** [[FBP0]] to %class.C**
+  // CHECK-DAG: [[FCP0:%.+]] = bitcast i8** [[FP0]] to %class.C**
+  // CHECK-DAG: store %class.C* [[VAL]], %class.C** [[FCBP0]]
+  // CHECK-DAG: store %class.C* [[VAL]], %class.C** [[FCP0]]
+  #pragma omp target update from(mapper(id): c)
 }
 
 
