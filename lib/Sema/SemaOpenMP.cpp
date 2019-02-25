@@ -13058,7 +13058,7 @@ ExprResult buildUserDefinedMapperRef(Sema &SemaRef, Scope *S,
     return UnresolvedLookupExpr::Create(
         SemaRef.Context, /*NamingClass=*/nullptr,
         MapperIdScopeSpec.getWithLocInContext(SemaRef.Context), MapperId,
-        /*ADL=*/false, /*Overloaded=*/true, URS.begin(), URS.end());
+        /*ADL=*/true, /*Overloaded=*/true, URS.begin(), URS.end());
   }
   // [OpenMP 5.0], 2.19.7.3 declare mapper Directive, Restrictions
   //  The type must be of struct, union or class type in C and C++
