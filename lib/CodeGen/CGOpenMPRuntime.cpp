@@ -715,6 +715,14 @@ enum OpenMPRTLFunction {
   // arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
   // *arg_types);
   OMPRTL__tgt_target_data_update_nowait,
+  // Call to void __tgt_target_data_mapper(int64_t device_id, int32_t arg_num,
+  // void** args_base, void **args, size_t *arg_sizes, int64_t *arg_types, void
+  // **arg_mapper_ptrs);
+  OMPRTL__tgt_target_data_mapper,
+  // Call to void __tgt_target_data_mapper_nowait(int64_t device_id, int32_t
+  // arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
+  // *arg_types, void **arg_mapper_ptrs);
+  OMPRTL__tgt_target_data_mapper_nowait,
 };
 
 /// A basic class for pre|post-action for advanced codegen sequence for OpenMP
@@ -1336,6 +1344,100 @@ CGOpenMPRuntime::getUserDefinedReduction(const OMPDeclareReductionDecl *D) {
     return I->second;
   emitUserDefinedReduction(/*CGF=*/nullptr, D);
   return UDRMap.lookup(D);
+}
+
+/// Emit the user-defined mapper function.
+/// \code
+/// int .omp_mapper_<mapper_id>.(int64_t device_id, Ty *base_ptr, Ty *ptr,
+///                              int64_t size, int64_t maptype, void *mapper) {
+///   for (unsigned i = 0; i < size; i++) {
+///     res = __tgt_target_data_mapper(device_id, /*arg_num*/1, arg_base, arg,
+///                                    size, maptype, mapper);
+//      if (res != 0)
+//        return res;
+//    }
+/// }
+/// \endcode
+void CGOpenMPRuntime::emitUserDefinedMapper(CodeGenFunction *ParentCGF,
+                                            const OMPDeclareMapperDecl *D) {
+  if (UDMMap.count(D) > 0)
+    return;
+  ASTContext &C = CGM.getContext();
+  QualType Type = D->getType();
+  QualType PtrTy = C.getPointerType(Type).withRestrict();
+  QualType Int64Ty = C.getIntTypeForBitwidth(/*DestWidth*/ 64, /*Signed*/ true);
+  FunctionArgList Args;
+  auto *MapperVarDecl =
+      cast<VarDecl>(cast<DeclRefExpr>(D->getMapperVarRef())->getDecl());
+  ImplicitParamDecl DeviceIdArg(C, Int64Ty, ImplicitParamDecl::Other);
+  ImplicitParamDecl BasePtrArg(C, /*DC=*/nullptr, MapperVarDecl->getLocation(),
+                               /*Id=*/nullptr, PtrTy, ImplicitParamDecl::Other);
+  ImplicitParamDecl PtrArg(C, /*DC=*/nullptr, MapperVarDecl->getLocation(),
+                           /*Id=*/nullptr, PtrTy, ImplicitParamDecl::Other);
+  ImplicitParamDecl SizeArg(C, Int64Ty, ImplicitParamDecl::Other);
+  ImplicitParamDecl MapTypeArg(C, Int64Ty, ImplicitParamDecl::Other);
+  ImplicitParamDecl MapperArg(C, C.VoidPtrTy, ImplicitParamDecl::Other);
+  Args.push_back(&DeviceIdArg);
+  Args.push_back(&BasePtrArg);
+  Args.push_back(&PtrArg);
+  Args.push_back(&SizeArg);
+  Args.push_back(&MapTypeArg);
+  Args.push_back(&MapperArg);
+  const CGFunctionInfo &FnInfo =
+      CGM.getTypes().arrangeBuiltinFunctionDeclaration(C.IntTy, Args);
+  llvm::FunctionType *FnTy = CGM.getTypes().GetFunctionType(FnInfo);
+  std::string Name = getName({"omp_mapper", D->getName()});
+  auto *Fn = llvm::Function::Create(FnTy, llvm::GlobalValue::InternalLinkage,
+                                    Name, &CGM.getModule());
+  CGM.SetInternalFunctionAttributes(GlobalDecl(), Fn, FnInfo);
+  Fn->removeFnAttr(llvm::Attribute::NoInline);
+  Fn->removeFnAttr(llvm::Attribute::OptimizeNone);
+  Fn->addFnAttr(llvm::Attribute::AlwaysInline);
+  CodeGenFunction CGF(CGM);
+  // Map "T omp_in;" variable to "*omp_in_parm" value in all expressions.
+  // Map "T omp_out;" variable to "*omp_out_parm" value in all expressions.
+  CGF.StartFunction(GlobalDecl(), C.VoidTy, Fn, FnInfo, Args, In->getLocation(),
+                    Out->getLocation());
+
+  /*
+  // Fill up the arrays with all the mapped variables.
+  MappableExprsHandler::MapBaseValuesArrayTy BasePointers;
+  MappableExprsHandler::MapValuesArrayTy Pointers;
+  MappableExprsHandler::MapValuesArrayTy Sizes;
+  MappableExprsHandler::MapFlagsArrayTy MapTypes;
+
+  // Get map clause information.
+  MappableExprsHandler MEHandler(D, CGF);
+  MEHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes);
+
+  CodeGenFunction::OMPPrivateScope Scope(CGF);
+  Address AddrIn = CGF.GetAddrOfLocalVar(&OmpInParm);
+  Scope.addPrivate(In, [&CGF, AddrIn, PtrTy]() {
+    return CGF.EmitLoadOfPointerLValue(AddrIn, PtrTy->castAs<PointerType>())
+        .getAddress();
+  });
+  Address AddrOut = CGF.GetAddrOfLocalVar(&OmpOutParm);
+  Scope.addPrivate(Out, [&CGF, AddrOut, PtrTy]() {
+    return CGF.EmitLoadOfPointerLValue(AddrOut, PtrTy->castAs<PointerType>())
+        .getAddress();
+  });
+  (void)Scope.Privatize();
+  if (!IsCombiner && Out->hasInit() &&
+      !CGF.isTrivialInitializer(Out->getInit())) {
+    CGF.EmitAnyExprToMem(Out->getInit(), CGF.GetAddrOfLocalVar(Out),
+                         Out->getType().getQualifiers(),
+                         true);
+  }
+  if (CombinerInitializer)
+    CGF.EmitIgnoredExpr(CombinerInitializer);
+  Scope.ForceCleanup();
+  */
+  CGF.FinishFunction();
+  UDMMap.try_emplace(D, Fn);
+  //if (ParentCGF) {
+  //  auto &Decls = FunctionUDMMap.FindAndConstruct(ParentCGF->CurFn);
+  //  Decls.second.push_back(D);
+  //}
 }
 
 static llvm::Function *emitParallelOrTeamsOutlinedFunction(
@@ -2377,6 +2479,38 @@ llvm::FunctionCallee CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
     auto *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg=*/false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_data_update_nowait");
+    break;
+  }
+  case OMPRTL__tgt_target_data_mapper: {
+    // Build void __tgt_target_data_mapper(int64_t device_id, int32_t arg_num,
+    // void** args_base, void **args, size_t *arg_sizes, int64_t *arg_types,
+    // void **arg_mapper_ptrs);
+    llvm::Type *TypeParams[] = {CGM.Int64Ty,
+                                CGM.Int32Ty,
+                                CGM.VoidPtrPtrTy,
+                                CGM.VoidPtrPtrTy,
+                                CGM.SizeTy->getPointerTo(),
+                                CGM.Int64Ty->getPointerTo(),
+                                CGM.VoidPtrPtrTy};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.IntTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_data_mapper");
+    break;
+  }
+  case OMPRTL__tgt_target_data_mapper_nowait: {
+    // Build void __tgt_target_data_mapper_nowait(int64_t device_id, int32_t
+    // arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
+    // *arg_types, void **arg_mapper_ptrs);
+    llvm::Type *TypeParams[] = {CGM.Int64Ty,
+                                CGM.Int32Ty,
+                                CGM.VoidPtrPtrTy,
+                                CGM.VoidPtrPtrTy,
+                                CGM.SizeTy->getPointerTo(),
+                                CGM.Int64Ty->getPointerTo(),
+                                CGM.VoidPtrPtrTy};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.IntTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_data_mapper_nowait");
     break;
   }
   }

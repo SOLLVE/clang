@@ -53,6 +53,7 @@ public:
   GlobalDecl(const CapturedDecl *D) { Init(D); }
   GlobalDecl(const ObjCMethodDecl *D) { Init(D); }
   GlobalDecl(const OMPDeclareReductionDecl *D) { Init(D); }
+  GlobalDecl(const OMPDeclareMapperDecl *D) { Init(D); }
   GlobalDecl(const CXXConstructorDecl *D, CXXCtorType Type) : Value(D, Type) {}
   GlobalDecl(const CXXDestructorDecl *D, CXXDtorType Type) : Value(D, Type) {}
 
