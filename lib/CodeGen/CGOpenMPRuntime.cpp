@@ -1346,118 +1346,6 @@ CGOpenMPRuntime::getUserDefinedReduction(const OMPDeclareReductionDecl *D) {
   return UDRMap.lookup(D);
 }
 
-/// Emit the user-defined mapper function.
-/// \code
-/// int .omp_mapper_<mapper_id>.(int64_t device_id, Ty *base_ptr, Ty *ptr,
-///                              int64_t size, int64_t maptype, void *mapper) {
-///   for (unsigned i = 0; i < size; i++) {
-///     res = __tgt_target_data_mapper(device_id, /*arg_num*/1, arg_base, arg,
-///                                    size, maptype, mapper);
-//      if (res != 0)
-//        return res;
-//    }
-/// }
-/// \endcode
-void CGOpenMPRuntime::emitUserDefinedMapper(CodeGenFunction *CGF,
-                                            const OMPDeclareMapperDecl *D) {
-  if (UDMMap.count(D) > 0)
-    return;
-  ASTContext &C = CGM.getContext();
-  QualType Ty = D->getType();
-  QualType PtrTy = C.getPointerType(Ty).withRestrict();
-  QualType Int64Ty = C.getIntTypeForBitwidth(/*DestWidth*/ 64, /*Signed*/ true);
-  auto *MapperVarDecl =
-      cast<VarDecl>(cast<DeclRefExpr>(D->getMapperVarRef())->getDecl());
-  SourceLocation Loc = D->getLocation();
-  CharUnits ElementSize = C.getTypeSizeInChars(Ty);
-
-  // Prepare mapper function arguments and attributes.
-  ImplicitParamDecl DeviceIdArg(C, Int64Ty, ImplicitParamDecl::Other);
-  ImplicitParamDecl BasePtrArg(C, /*DC=*/nullptr, MapperVarDecl->getLocation(),
-                               /*Id=*/nullptr, PtrTy, ImplicitParamDecl::Other);
-  ImplicitParamDecl PtrArg(C, /*DC=*/nullptr, MapperVarDecl->getLocation(),
-                           /*Id=*/nullptr, PtrTy, ImplicitParamDecl::Other);
-  ImplicitParamDecl SizeArg(C, Int64Ty, ImplicitParamDecl::Other);
-  ImplicitParamDecl MapTypeArg(C, Int64Ty, ImplicitParamDecl::Other);
-  ImplicitParamDecl MapperArg(C, C.VoidPtrTy, ImplicitParamDecl::Other);
-  FunctionArgList Args;
-  Args.push_back(&DeviceIdArg);
-  Args.push_back(&BasePtrArg);
-  Args.push_back(&PtrArg);
-  Args.push_back(&SizeArg);
-  Args.push_back(&MapTypeArg);
-  Args.push_back(&MapperArg);
-  const CGFunctionInfo &FnInfo =
-      CGM.getTypes().arrangeBuiltinFunctionDeclaration(C.IntTy, Args);
-  llvm::FunctionType *FnTy = CGM.getTypes().GetFunctionType(FnInfo);
-  std::string Name = getName({"omp_mapper", D->getName()});
-  auto *Fn = llvm::Function::Create(FnTy, llvm::GlobalValue::InternalLinkage,
-                                    Name, &CGM.getModule());
-  CGM.SetInternalFunctionAttributes(GlobalDecl(), Fn, FnInfo);
-  Fn->removeFnAttr(llvm::Attribute::NoInline);
-  Fn->removeFnAttr(llvm::Attribute::OptimizeNone);
-  Fn->addFnAttr(llvm::Attribute::AlwaysInline);
-  CodeGenFunction MapperCGF(CGM);
-  // Emit the mapper function.
-  MapperCGF.StartFunction(GlobalDecl(), C.IntTy, Fn, FnInfo, Args, Loc, Loc);
-
-  // Emit a for loop to iterate through SizeArg of elements and map all of them.
-
-  // Emit the loop header block.
-  llvm::BasicBlock *BodyBB = MapperCGF.createBasicBlock("omp.arraymap.body");
-  llvm::BasicBlock *DoneBB = MapperCGF.createBasicBlock("omp.arraymap.done");
-  llvm::Value *Size = MapperCGF.EmitLoadOfScalar(
-      MapperCGF.GetAddrOfLocalVar(&SizeArg), /*Volatile=*/false,
-      C.getPointerType(Int64Ty), Loc);
-  // Compute the starting and end addreses of array elements.
-  llvm::Value *PtrBegin = MapperCGF.GetAddrOfLocalVar(&PtrArg).getPointer();
-  llvm::Value *PtrEnd = MapperCGF.Builder.CreateGEP(PtrBegin, Size);
-  llvm::Value *IsEmpty =
-      MapperCGF.Builder.CreateICmpEQ(PtrBegin, PtrEnd, "omp.arraymap.isempty");
-  MapperCGF.Builder.CreateCondBr(IsEmpty, DoneBB, BodyBB);
-  llvm::BasicBlock *EntryBB = MapperCGF.Builder.GetInsertBlock();
-
-  // Emit the loop body block.
-  MapperCGF.EmitBlock(BodyBB);
-  llvm::PHINode *PtrPHI = MapperCGF.Builder.CreatePHI(
-      PtrBegin->getType(), 2, "omp.arraymap.ptrcurrent");
-  PtrPHI->addIncoming(PtrBegin, EntryBB);
-  Address PtrCurrent =
-      Address(PtrPHI, MapperCGF.GetAddrOfLocalVar(&PtrArg)
-                          .getAlignment()
-                          .alignmentOfArrayElement(ElementSize));
-  // Update the pointer to point to the next element that needs to be mapped,
-  // and check whether we have mapped all elements.
-  llvm::Value *PtrNext = MapperCGF.Builder.CreateConstGEP1_32(
-      PtrPHI, /*Idx0=*/1, "omp.arraymap.next");
-  PtrPHI->addIncoming(PtrNext, BodyBB);
-  llvm::Value *IsDone =
-      MapperCGF.Builder.CreateICmpEQ(PtrNext, PtrEnd, "omp.arraymap.isdone");
-  MapperCGF.Builder.CreateCondBr(IsDone, DoneBB, BodyBB);
-
-  /*
-  // Fill up the arrays with all the mapped variables.
-  MappableExprsHandler::MapBaseValuesArrayTy BasePointers;
-  MappableExprsHandler::MapValuesArrayTy Pointers;
-  MappableExprsHandler::MapValuesArrayTy Sizes;
-  MappableExprsHandler::MapFlagsArrayTy MapTypes;
-
-  // Get map clause information.
-  MappableExprsHandler MEHandler(D, MapperCGF);
-  MEHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes);
-  */
-
-  // Emit the loop exit block.
-  MapperCGF.EmitBlock(DoneBB, /*IsFinished=*/true);
-  MapperCGF.FinishFunction();
-  UDMMap.try_emplace(D, Fn);
-
-  //if (CGF) {
-  //  auto &Decls = FunctionUDMMap.FindAndConstruct(CGF->CurFn);
-  //  Decls.second.push_back(D);
-  //}
-}
-
 static llvm::Function *emitParallelOrTeamsOutlinedFunction(
     CodeGenModule &CGM, const OMPExecutableDirective &D, const CapturedStmt *CS,
     const VarDecl *ThreadIDVar, OpenMPDirectiveKind InnermostKind,
@@ -8407,6 +8295,172 @@ getNestedDistributeDirective(ASTContext &Ctx, const OMPExecutableDirective &D) {
   }
 
   return nullptr;
+}
+
+/// Emit the user-defined mapper function.
+/// \code
+/// int .omp_mapper_<mapper_id>.(int64_t device_id, Ty *base_ptr, Ty *ptr,
+///                              int64_t size, int64_t maptype, void *mapper) {
+///   for (unsigned i = 0; i < size; i++) {
+///     res = __tgt_target_data_mapper(device_id, /*arg_num*/1, arg_base, arg,
+///                                    size, maptype, mapper);
+///     if (res != 0)
+///       return res;
+///   }
+/// }
+/// \endcode
+void CGOpenMPRuntime::emitUserDefinedMapper(CodeGenFunction *CGF,
+                                            const OMPDeclareMapperDecl *D) {
+  if (UDMMap.count(D) > 0)
+    return;
+  ASTContext &C = CGM.getContext();
+  QualType Ty = D->getType();
+  QualType PtrTy = C.getPointerType(Ty).withRestrict();
+  QualType Int64Ty = C.getIntTypeForBitwidth(/*DestWidth*/ 64, /*Signed*/ true);
+  auto *MapperVarDecl =
+      cast<VarDecl>(cast<DeclRefExpr>(D->getMapperVarRef())->getDecl());
+  SourceLocation Loc = D->getLocation();
+  CharUnits ElementSize = C.getTypeSizeInChars(Ty);
+  // FIXME: need to have 2 calls to emit 2 functions.
+  bool NoWait = false;
+
+  // Prepare mapper function arguments and attributes.
+  ImplicitParamDecl DeviceIdArg(C, Int64Ty, ImplicitParamDecl::Other);
+  ImplicitParamDecl BasePtrArg(C, /*DC=*/nullptr, MapperVarDecl->getLocation(),
+                               /*Id=*/nullptr, PtrTy, ImplicitParamDecl::Other);
+  ImplicitParamDecl PtrArg(C, /*DC=*/nullptr, MapperVarDecl->getLocation(),
+                           /*Id=*/nullptr, PtrTy, ImplicitParamDecl::Other);
+  ImplicitParamDecl SizeArg(C, Int64Ty, ImplicitParamDecl::Other);
+  ImplicitParamDecl MapTypeArg(C, Int64Ty, ImplicitParamDecl::Other);
+  ImplicitParamDecl MapperArg(C, C.VoidPtrTy, ImplicitParamDecl::Other);
+  FunctionArgList Args;
+  Args.push_back(&DeviceIdArg);
+  Args.push_back(&BasePtrArg);
+  Args.push_back(&PtrArg);
+  Args.push_back(&SizeArg);
+  Args.push_back(&MapTypeArg);
+  Args.push_back(&MapperArg);
+  const CGFunctionInfo &FnInfo =
+      CGM.getTypes().arrangeBuiltinFunctionDeclaration(C.IntTy, Args);
+  llvm::FunctionType *FnTy = CGM.getTypes().GetFunctionType(FnInfo);
+  std::string Name = getName({"omp_mapper", D->getName()});
+  auto *Fn = llvm::Function::Create(FnTy, llvm::GlobalValue::InternalLinkage,
+                                    Name, &CGM.getModule());
+  CGM.SetInternalFunctionAttributes(GlobalDecl(), Fn, FnInfo);
+  Fn->removeFnAttr(llvm::Attribute::NoInline);
+  Fn->removeFnAttr(llvm::Attribute::OptimizeNone);
+  Fn->addFnAttr(llvm::Attribute::AlwaysInline);
+  CodeGenFunction MapperCGF(CGM);
+  // Emit the mapper function.
+  MapperCGF.StartFunction(GlobalDecl(), C.IntTy, Fn, FnInfo, Args, Loc, Loc);
+  // Initiate return value.
+  llvm::Value *SuccessRetVal = llvm::ConstantInt::getNullValue(CGM.IntTy);
+  MapperCGF.EmitStoreOfScalar(SuccessRetVal, MapperCGF.ReturnValue,
+                              /*Volatile=*/false, C.IntTy);
+
+  // Emit a for loop to iterate through SizeArg of elements and map all of them.
+
+  // Emit the loop header block.
+  llvm::BasicBlock *BodyBB = MapperCGF.createBasicBlock("omp.arraymap.body");
+  llvm::BasicBlock *ErrorBB = MapperCGF.createBasicBlock("omp.arraymap.error");
+  llvm::BasicBlock *CorrectBB =
+      MapperCGF.createBasicBlock("omp.arraymap.correct");
+  llvm::BasicBlock *DoneBB = MapperCGF.createBasicBlock("omp.arraymap.done");
+  llvm::Value *Size = MapperCGF.EmitLoadOfScalar(
+      MapperCGF.GetAddrOfLocalVar(&SizeArg), /*Volatile=*/false,
+      C.getPointerType(Int64Ty), Loc);
+  // Compute the starting and end addreses of array elements.
+  llvm::Value *PtrBegin = MapperCGF.GetAddrOfLocalVar(&PtrArg).getPointer();
+  llvm::Value *PtrEnd = MapperCGF.Builder.CreateGEP(PtrBegin, Size);
+  llvm::Value *IsEmpty =
+      MapperCGF.Builder.CreateICmpEQ(PtrBegin, PtrEnd, "omp.arraymap.isempty");
+  MapperCGF.Builder.CreateCondBr(IsEmpty, DoneBB, BodyBB);
+  llvm::BasicBlock *EntryBB = MapperCGF.Builder.GetInsertBlock();
+
+  // Emit the loop body block.
+  MapperCGF.EmitBlock(BodyBB);
+  llvm::PHINode *PtrPHI = MapperCGF.Builder.CreatePHI(
+      PtrBegin->getType(), 2, "omp.arraymap.ptrcurrent");
+  PtrPHI->addIncoming(PtrBegin, EntryBB);
+  Address PtrCurrent =
+      Address(PtrPHI, MapperCGF.GetAddrOfLocalVar(&PtrArg)
+                          .getAlignment()
+                          .alignmentOfArrayElement(ElementSize));
+
+  // 
+  CodeGenFunction::OMPTargetDataInfo InputInfo;
+
+  /*
+  // Fill up the arrays with all the mapped variables.
+  MappableExprsHandler::MapBaseValuesArrayTy BasePointers;
+  MappableExprsHandler::MapValuesArrayTy Pointers;
+  MappableExprsHandler::MapValuesArrayTy Sizes;
+  MappableExprsHandler::MapFlagsArrayTy MapTypes;
+
+  // Get map clause information.
+  MappableExprsHandler MEHandler(D, MapperCGF);
+  MEHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes);
+  */
+
+  // Call the runtime API __tgt_target_data_mapper(_nowait) to map data.
+  llvm::Value *DeviceID = MapperCGF.EmitLoadOfScalar(
+      MapperCGF.GetAddrOfLocalVar(&DeviceIdArg), /*Volatile=*/false,
+      C.getPointerType(Int64Ty), Loc);
+  llvm::Value *PointerNum =
+      MapperCGF.Builder.getInt32(InputInfo.NumberOfTargetItems);
+  TargetDataInfo Info;
+  // Fill up the arrays and create the arguments.
+  //emitOffloadingArrays(CGF, BasePointers, Pointers, Sizes, MapTypes, Info);
+  emitOffloadingArraysArgument(MapperCGF, Info.BasePointersArray,
+                               Info.PointersArray, Info.SizesArray,
+                               Info.MapTypesArray, Info);
+  InputInfo.NumberOfTargetItems = Info.NumberOfPtrs;
+  InputInfo.BasePointersArray =
+      Address(Info.BasePointersArray, CGM.getPointerAlign());
+  InputInfo.PointersArray = Address(Info.PointersArray, CGM.getPointerAlign());
+  InputInfo.SizesArray = Address(Info.SizesArray, CGM.getPointerAlign());
+  llvm::Value *MapTypesArray = Info.MapTypesArray;
+  llvm::Value *OffloadingArgs[] = {
+      DeviceID,
+      /*arg_num*/ PointerNum,
+      InputInfo.BasePointersArray.getPointer(),
+      InputInfo.PointersArray.getPointer(),
+      InputInfo.SizesArray.getPointer(),
+      /*maptype*/ MapTypesArray,
+      /*mapper*/ InputInfo.BasePointersArray.getPointer()};
+  llvm::Value *Return = MapperCGF.EmitRuntimeCall(
+      createRuntimeFunction(NoWait ? OMPRTL__tgt_target_data_mapper_nowait
+                                   : OMPRTL__tgt_target_data_mapper),
+      OffloadingArgs);
+
+  // Break the loop if the return value indicates data mapping failure.
+  llvm::Value *IsFailed = MapperCGF.Builder.CreateIsNotNull(Return);
+  MapperCGF.Builder.CreateCondBr(IsFailed, ErrorBB, CorrectBB);
+  MapperCGF.EmitBlock(ErrorBB);
+  MapperCGF.EmitStoreOfScalar(Return, MapperCGF.ReturnValue,
+                              /*Volatile=*/false, C.IntTy);
+  MapperCGF.Builder.CreateBr(DoneBB);
+
+  // Update the pointer to point to the next element that needs to be mapped,
+  // and check whether we have mapped all elements.
+  MapperCGF.EmitBlock(CorrectBB);
+  llvm::Value *PtrNext = MapperCGF.Builder.CreateConstGEP1_32(
+      PtrPHI, /*Idx0=*/1, "omp.arraymap.next");
+  PtrPHI->addIncoming(PtrNext, CorrectBB);
+  llvm::Value *IsDone =
+      MapperCGF.Builder.CreateICmpEQ(PtrNext, PtrEnd, "omp.arraymap.isdone");
+  MapperCGF.Builder.CreateCondBr(IsDone, DoneBB, BodyBB);
+
+  // Emit the loop exit block.
+  MapperCGF.EmitBlock(DoneBB, /*IsFinished=*/true);
+  MapperCGF.FinishFunction();
+
+  // Add the generated mapper function to UDMMap.
+  UDMMap.try_emplace(D, Fn);
+  //if (CGF) {
+  //  auto &Decls = FunctionUDMMap.FindAndConstruct(CGF->CurFn);
+  //  Decls.second.push_back(D);
+  //}
 }
 
 void CGOpenMPRuntime::emitTargetNumIterationsCall(
