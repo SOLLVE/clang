@@ -6750,7 +6750,11 @@ private:
   };
 
   /// Directive from where the map clauses were extracted.
-  const OMPExecutableDirective &CurDir;
+  const OMPExecutableDirective *CurDir = nullptr;
+
+  /// The mapper directive from where the map clauses were extracted. Only one
+  /// of CurDir and CurMapperDir can be valid at the same time.
+  const OMPDeclareMapperDecl *CurMapperDir = nullptr;
 
   /// Function the directive is being generated for.
   CodeGenFunction &CGF;
@@ -7420,7 +7424,7 @@ private:
 
 public:
   MappableExprsHandler(const OMPExecutableDirective &Dir, CodeGenFunction &CGF)
-      : CurDir(Dir), CGF(CGF) {
+      : CurDir(&Dir), CGF(CGF) {
     // Extract firstprivate clause information.
     for (const auto *C : Dir.getClausesOfKind<OMPFirstprivateClause>())
       for (const auto *D : C->varlists())
@@ -7431,6 +7435,10 @@ public:
       for (auto L : C->component_lists())
         DevPointersMap[L.first].push_back(L.second);
   }
+
+  /// Constructor for the declare mapper directive.
+  MappableExprsHandler(const OMPDeclareMapperDecl &Dir, CodeGenFunction &CGF)
+      : CurMapperDir(&Dir), CGF(CGF) {}
 
   /// Generate code for the combined entry if we have a partially mapped struct
   /// and take care of the mapping flags of the arguments corresponding to
@@ -7494,17 +7502,17 @@ public:
     };
 
     // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
-    for (const auto *C : this->CurDir.getClausesOfKind<OMPMapClause>())
+    for (const auto *C : this->CurDir->getClausesOfKind<OMPMapClause>())
       for (const auto &L : C->component_lists()) {
         InfoGen(L.first, L.second, C->getMapType(), C->getMapTypeModifiers(),
             /*ReturnDevicePointer=*/false, C->isImplicit());
       }
-    for (const auto *C : this->CurDir.getClausesOfKind<OMPToClause>())
+    for (const auto *C : this->CurDir->getClausesOfKind<OMPToClause>())
       for (const auto &L : C->component_lists()) {
         InfoGen(L.first, L.second, OMPC_MAP_to, llvm::None,
             /*ReturnDevicePointer=*/false, C->isImplicit());
       }
-    for (const auto *C : this->CurDir.getClausesOfKind<OMPFromClause>())
+    for (const auto *C : this->CurDir->getClausesOfKind<OMPFromClause>())
       for (const auto &L : C->component_lists()) {
         InfoGen(L.first, L.second, OMPC_MAP_from, llvm::None,
             /*ReturnDevicePointer=*/false, C->isImplicit());
@@ -7521,7 +7529,7 @@ public:
 
     // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
     for (const auto *C :
-        this->CurDir.getClausesOfKind<OMPUseDevicePtrClause>()) {
+        this->CurDir->getClausesOfKind<OMPUseDevicePtrClause>()) {
       for (const auto &L : C->component_lists()) {
         assert(!L.second.empty() && "Not expecting empty list of components!");
         const ValueDecl *VD = L.second.back().getAssociatedDeclaration();
@@ -7647,6 +7655,78 @@ public:
     }
   }
 
+  /// Generate all the base pointers, section pointers, sizes and map types for
+  /// the extracted map clauses.
+  void generateAllInfoForMapper(MapBaseValuesArrayTy &BasePointers,
+                                MapValuesArrayTy &Pointers,
+                                MapValuesArrayTy &Sizes,
+                                MapFlagsArrayTy &Types) const {
+    assert(CurMapperDir && "Expect a valid declare mapper directive.");
+    // We have to process the component lists that relate with the same
+    // declaration in a single chunk so that we can generate the map flags
+    // correctly. Therefore, we organize all lists in a map.
+    llvm::MapVector<const ValueDecl *, SmallVector<MapInfo, 8>> Info;
+
+    // Helper function to fill the information map for the different supported
+    // clauses.
+    auto &&InfoGen = [&Info](
+        const ValueDecl *D,
+        OMPClauseMappableExprCommon::MappableExprComponentListRef L,
+        OpenMPMapClauseKind MapType,
+        ArrayRef<OpenMPMapModifierKind> MapModifiers,
+        bool ReturnDevicePointer, bool IsImplicit) {
+      const ValueDecl *VD =
+          D ? cast<ValueDecl>(D->getCanonicalDecl()) : nullptr;
+      Info[VD].emplace_back(L, MapType, MapModifiers, ReturnDevicePointer,
+                            IsImplicit);
+    };
+
+    // FIXME: MSVC 2013 seems to require this-> to find member CurMapperDir.
+    for (const auto *C : this->CurMapperDir->clauselists()) {
+      const auto *MC = cast<OMPMapClause>(C);
+      for (const auto &L : MC->component_lists()) {
+        InfoGen(L.first, L.second, MC->getMapType(), MC->getMapTypeModifiers(),
+                /*ReturnDevicePointer=*/false, MC->isImplicit());
+      }
+    }
+
+    for (const auto &M : Info) {
+      // We need to know when we generate information for the first component
+      // associated with a capture, because the mapping flags depend on it.
+      bool IsFirstComponentList = true;
+
+      // Temporary versions of arrays
+      MapBaseValuesArrayTy CurBasePointers;
+      MapValuesArrayTy CurPointers;
+      MapValuesArrayTy CurSizes;
+      MapFlagsArrayTy CurTypes;
+      StructRangeInfoTy PartialStruct;
+
+      for (const MapInfo &L : M.second) {
+        assert(!L.Components.empty() &&
+               "Not expecting declaration with no component lists.");
+        // FIXME: MSVC 2013 seems to require this-> to find the member method.
+        this->generateInfoForComponentList(
+            L.MapType, L.MapModifiers, L.Components, CurBasePointers,
+            CurPointers, CurSizes, CurTypes, PartialStruct,
+            IsFirstComponentList, L.IsImplicit);
+        IsFirstComponentList = false;
+      }
+
+      // If there is an entry in PartialStruct it means we have a struct with
+      // individual members mapped. Emit an extra combined entry.
+      if (PartialStruct.Base.isValid())
+        emitCombinedEntry(BasePointers, Pointers, Sizes, Types, CurTypes,
+                          PartialStruct);
+
+      // We need to append the results of this capture to what we already have.
+      BasePointers.append(CurBasePointers.begin(), CurBasePointers.end());
+      Pointers.append(CurPointers.begin(), CurPointers.end());
+      Sizes.append(CurSizes.begin(), CurSizes.end());
+      Types.append(CurTypes.begin(), CurTypes.end());
+    }
+  }
+
   /// Emit capture info for lambdas for variables captured by reference.
   void generateInfoForLambdaCaptures(
       const ValueDecl *VD, llvm::Value *Arg, MapBaseValuesArrayTy &BasePointers,
@@ -7755,7 +7835,7 @@ public:
                    OpenMPMapClauseKind, ArrayRef<OpenMPMapModifierKind>, bool>;
     SmallVector<MapData, 4> DeclComponentLists;
     // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
-    for (const auto *C : this->CurDir.getClausesOfKind<OMPMapClause>()) {
+    for (const auto *C : this->CurDir->getClausesOfKind<OMPMapClause>()) {
       for (const auto &L : C->decl_component_lists(VD)) {
         assert(L.first == VD &&
                "We got information for the wrong declaration??");
@@ -7905,7 +7985,7 @@ public:
                                         MapFlagsArrayTy &Types) const {
     // Map other list items in the map clause which are not captured variables
     // but "declare target link" global variables.,
-    for (const auto *C : this->CurDir.getClausesOfKind<OMPMapClause>()) {
+    for (const auto *C : this->CurDir->getClausesOfKind<OMPMapClause>()) {
       for (const auto &L : C->component_lists()) {
         if (!L.first)
           continue;
@@ -8302,9 +8382,10 @@ getNestedDistributeDirective(ASTContext &Ctx, const OMPExecutableDirective &D) {
 /// int .omp_mapper_<mapper_id>.(int64_t device_id, Ty *base_ptr, Ty *ptr,
 ///                              int64_t size, int64_t maptype, void *mapper) {
 ///   for (unsigned i = 0; i < size; i++) {
+///     ...; // Prepare arguments of __tgt_target_data_mapper.
 ///     res = __tgt_target_data_mapper(device_id, /*arg_num*/1, arg_base, arg,
 ///                                    size, maptype, mapper);
-///     if (res != 0)
+///     if (res != 0) // Data mapping failed.
 ///       return res;
 ///   }
 /// }
@@ -8347,13 +8428,11 @@ void CGOpenMPRuntime::emitUserDefinedMapper(CodeGenFunction *CGF,
   auto *Fn = llvm::Function::Create(FnTy, llvm::GlobalValue::InternalLinkage,
                                     Name, &CGM.getModule());
   CGM.SetInternalFunctionAttributes(GlobalDecl(), Fn, FnInfo);
-  Fn->removeFnAttr(llvm::Attribute::NoInline);
   Fn->removeFnAttr(llvm::Attribute::OptimizeNone);
-  Fn->addFnAttr(llvm::Attribute::AlwaysInline);
-  CodeGenFunction MapperCGF(CGM);
   // Emit the mapper function.
+  CodeGenFunction MapperCGF(CGM);
   MapperCGF.StartFunction(GlobalDecl(), C.IntTy, Fn, FnInfo, Args, Loc, Loc);
-  // Initiate return value.
+  // Initiate the return value to 0, which represents success.
   llvm::Value *SuccessRetVal = llvm::ConstantInt::getNullValue(CGM.IntTy);
   MapperCGF.EmitStoreOfScalar(SuccessRetVal, MapperCGF.ReturnValue,
                               /*Volatile=*/false, C.IntTy);
@@ -8386,48 +8465,47 @@ void CGOpenMPRuntime::emitUserDefinedMapper(CodeGenFunction *CGF,
       Address(PtrPHI, MapperCGF.GetAddrOfLocalVar(&PtrArg)
                           .getAlignment()
                           .alignmentOfArrayElement(ElementSize));
+  // Privatize the declared variable of mapper to be the current array element.
+  CodeGenFunction::OMPPrivateScope Scope(MapperCGF);
+  Scope.addPrivate(MapperVarDecl, [&MapperCGF, PtrCurrent, PtrTy]() {
+    return MapperCGF
+        .EmitLoadOfPointerLValue(PtrCurrent, PtrTy->castAs<PointerType>())
+        .getAddress();
+  });
+  (void)Scope.Privatize();
 
-  // 
-  CodeGenFunction::OMPTargetDataInfo InputInfo;
-
-  /*
+  // Get map clause information.
   // Fill up the arrays with all the mapped variables.
   MappableExprsHandler::MapBaseValuesArrayTy BasePointers;
   MappableExprsHandler::MapValuesArrayTy Pointers;
   MappableExprsHandler::MapValuesArrayTy Sizes;
   MappableExprsHandler::MapFlagsArrayTy MapTypes;
-
-  // Get map clause information.
-  MappableExprsHandler MEHandler(D, MapperCGF);
-  MEHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes);
-  */
+  MappableExprsHandler MEHandler(*D, MapperCGF);
+  MEHandler.generateAllInfoForMapper(BasePointers, Pointers, Sizes, MapTypes);
+  // Fill up the arrays and create the arguments.
+  TargetDataInfo Info;
+  emitOffloadingArrays(MapperCGF, BasePointers, Pointers, Sizes, MapTypes,
+                       Info);
+  llvm::Value *BasePointersArrayArg = nullptr;
+  llvm::Value *PointersArrayArg = nullptr;
+  llvm::Value *SizesArrayArg = nullptr;
+  llvm::Value *MapTypesArrayArg = nullptr;
+  emitOffloadingArraysArgument(MapperCGF, BasePointersArrayArg,
+                               PointersArrayArg, SizesArrayArg,
+                               MapTypesArrayArg, Info);
 
   // Call the runtime API __tgt_target_data_mapper(_nowait) to map data.
   llvm::Value *DeviceID = MapperCGF.EmitLoadOfScalar(
       MapperCGF.GetAddrOfLocalVar(&DeviceIdArg), /*Volatile=*/false,
       C.getPointerType(Int64Ty), Loc);
-  llvm::Value *PointerNum =
-      MapperCGF.Builder.getInt32(InputInfo.NumberOfTargetItems);
-  TargetDataInfo Info;
-  // Fill up the arrays and create the arguments.
-  //emitOffloadingArrays(CGF, BasePointers, Pointers, Sizes, MapTypes, Info);
-  emitOffloadingArraysArgument(MapperCGF, Info.BasePointersArray,
-                               Info.PointersArray, Info.SizesArray,
-                               Info.MapTypesArray, Info);
-  InputInfo.NumberOfTargetItems = Info.NumberOfPtrs;
-  InputInfo.BasePointersArray =
-      Address(Info.BasePointersArray, CGM.getPointerAlign());
-  InputInfo.PointersArray = Address(Info.PointersArray, CGM.getPointerAlign());
-  InputInfo.SizesArray = Address(Info.SizesArray, CGM.getPointerAlign());
-  llvm::Value *MapTypesArray = Info.MapTypesArray;
-  llvm::Value *OffloadingArgs[] = {
-      DeviceID,
-      /*arg_num*/ PointerNum,
-      InputInfo.BasePointersArray.getPointer(),
-      InputInfo.PointersArray.getPointer(),
-      InputInfo.SizesArray.getPointer(),
-      /*maptype*/ MapTypesArray,
-      /*mapper*/ InputInfo.BasePointersArray.getPointer()};
+  llvm::Value *PointerNum = MapperCGF.Builder.getInt32(Info.NumberOfPtrs);
+  llvm::Value *OffloadingArgs[] = {DeviceID,
+                                   /*arg_num*/ PointerNum,
+                                   BasePointersArrayArg,
+                                   PointersArrayArg,
+                                   SizesArrayArg,
+                                   MapTypesArrayArg,
+                                   /*mapper*/ BasePointersArrayArg};
   llvm::Value *Return = MapperCGF.EmitRuntimeCall(
       createRuntimeFunction(NoWait ? OMPRTL__tgt_target_data_mapper_nowait
                                    : OMPRTL__tgt_target_data_mapper),
