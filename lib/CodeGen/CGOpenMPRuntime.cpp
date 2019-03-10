@@ -8494,8 +8494,8 @@ void CGOpenMPRuntime::emitUserDefinedMapper(CodeGenFunction *CGF,
       C.getPointerType(Int64Ty), Loc);
   llvm::Value *InitMapType = MapperCGF.Builder.CreateAnd(
       MapType,
-      MapperCGF.Builder.getInt64(~(MappableExprsHandler::OMP_MAP_TO &
-                                   MappableExprsHandler::OMP_MAP_FROM &
+      MapperCGF.Builder.getInt64(~(MappableExprsHandler::OMP_MAP_TO |
+                                   MappableExprsHandler::OMP_MAP_FROM |
                                    MappableExprsHandler::OMP_MAP_DELETE)));
   QualType MapArrayType =
       C.getConstantArrayType(Int64Ty, PointerNumAP, ArrayType::Normal,
