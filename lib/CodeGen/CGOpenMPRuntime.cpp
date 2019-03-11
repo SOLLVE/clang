@@ -8230,18 +8230,16 @@ emitOffloadingArrays(CodeGenFunction &CGF,
             OriMapType,
             CGF.Builder.getInt64(MappableExprsHandler::OMP_MAP_TO |
                                  MappableExprsHandler::OMP_MAP_FROM));
-        llvm::BasicBlock *AllocBB =
-            CGF.createBasicBlock("omp.mappertype.alloc");
+        llvm::BasicBlock *AllocBB = CGF.createBasicBlock("omp.type.alloc");
         llvm::BasicBlock *AllocElseBB =
-            CGF.createBasicBlock("omp.mappertype.alloc.else");
-        llvm::BasicBlock *ToBB = CGF.createBasicBlock("omp.mappertype.to");
-        llvm::BasicBlock *ToElseBB =
-            CGF.createBasicBlock("omp.mappertype.to.else");
-        llvm::BasicBlock *FromBB = CGF.createBasicBlock("omp.mappertype.from");
-        llvm::BasicBlock *EndBB = CGF.createBasicBlock("omp.mappertype.end");
+            CGF.createBasicBlock("omp.type.alloc.else");
+        llvm::BasicBlock *ToBB = CGF.createBasicBlock("omp.type.to");
+        llvm::BasicBlock *ToElseBB = CGF.createBasicBlock("omp.type.to.else");
+        llvm::BasicBlock *FromBB = CGF.createBasicBlock("omp.type.from");
+        llvm::BasicBlock *EndBB = CGF.createBasicBlock("omp.type.end");
         llvm::Value *IsAlloc = CGF.Builder.CreateIsNull(LeftToFrom);
         CGF.Builder.CreateCondBr(IsAlloc, AllocBB, AllocElseBB);
-        // Case for alloc, clear OMP_MAP_TO and OMP_MAP_FROM.
+        // In case of alloc, clear OMP_MAP_TO and OMP_MAP_FROM.
         CGF.EmitBlock(AllocBB);
         llvm::Value *AllocMapType = CGF.Builder.CreateAnd(
             MapperMapType,
@@ -8252,7 +8250,7 @@ emitOffloadingArrays(CodeGenFunction &CGF,
         llvm::Value *IsTo = CGF.Builder.CreateICmpEQ(
             LeftToFrom, CGF.Builder.getInt64(MappableExprsHandler::OMP_MAP_TO));
         CGF.Builder.CreateCondBr(IsTo, ToBB, ToElseBB);
-        // Case for to, clear OMP_MAP_FROM.
+        // In case of to, clear OMP_MAP_FROM.
         CGF.EmitBlock(ToBB);
         llvm::Value *ToMapType = CGF.Builder.CreateAnd(
             MapperMapType,
@@ -8263,18 +8261,19 @@ emitOffloadingArrays(CodeGenFunction &CGF,
             LeftToFrom,
             CGF.Builder.getInt64(MappableExprsHandler::OMP_MAP_FROM));
         CGF.Builder.CreateCondBr(IsFrom, FromBB, EndBB);
-        // Case for from, clear OMP_MAP_TO.
+        // In case of from, clear OMP_MAP_TO.
         CGF.EmitBlock(FromBB);
         llvm::Value *FromMapType = CGF.Builder.CreateAnd(
             MapperMapType,
             CGF.Builder.getInt64(~MappableExprsHandler::OMP_MAP_TO));
-        // Case for tofrom, do nothing.
+        // In case of tofrom, do nothing.
         CGF.EmitBlock(EndBB);
         llvm::PHINode *MapType =
-            CGF.Builder.CreatePHI(CGM.Int64Ty, 3, "omp.maptype");
+            CGF.Builder.CreatePHI(CGM.Int64Ty, 4, "omp.maptype");
         MapType->addIncoming(AllocMapType, AllocBB);
         MapType->addIncoming(ToMapType, ToBB);
         MapType->addIncoming(FromMapType, FromBB);
+        MapType->addIncoming(MapperMapType, ToElseBB);
         Address Addr(GEP, Ctx.getTypeAlignInChars(Ctx.getIntTypeForBitwidth(
                               /*DestWidth*/ 64, /*Signed*/ true)));
         CGF.Builder.CreateStore(MapType, Addr);
