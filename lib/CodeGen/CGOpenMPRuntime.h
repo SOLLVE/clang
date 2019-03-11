@@ -788,6 +788,14 @@ public:
   /// Emit code for the user defined mapper construct.
   virtual void emitUserDefinedMapper(const OMPDeclareMapperDecl *D);
 
+  // Emit the array initialization or deletion portion for user-defined mapper
+  // code generation.
+  virtual llvm::Value *
+  emitUDMapperArrayInitOrDel(CodeGenFunction &MapperCGF, llvm::Value *DeviceID,
+                             llvm::Value *BasePtr, llvm::Value *Ptr,
+                             llvm::Value *Size, llvm::Value *MapType,
+                             CharUnits ElementSize, bool IsInit, bool NoWait);
+
   /// Emits outlined function for the specified OpenMP parallel directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,
   /// kmp_int32 BoundID, struct context_vars*).

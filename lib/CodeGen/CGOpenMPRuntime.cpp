@@ -8468,16 +8468,25 @@ getNestedDistributeDirective(ASTContext &Ctx, const OMPExecutableDirective &D) {
 /// \code
 /// int .omp_mapper_<mapper_id>.(int64_t device_id, Ty *base_ptr, Ty *ptr,
 ///                              int64_t size, int64_t maptype) {
-///   if (size > 1) { // Allocate space for an array section first.
+///   // Allocate space for an array section first.
+///   if (size > 1 && !maptype.IsDelete) {
 ///     res = __tgt_target_data_mapper(device_id, /*arg_num*/1, &base_ptr, &ptr,
 ///                                    size*sizeof(Ty), maptype, null);
 ///     if (res != 0) // Data mapping failed.
 ///       return res;
 ///   }
+///   // Map members.
 ///   for (unsigned i = 0; i < size; i++) {
 ///     ...; // Prepare arguments of __tgt_target_data_mapper.
 ///     res = __tgt_target_data_mapper(device_id, arg_num, arg_base, arg, size,
 ///                                    maptype, mapper);
+///     if (res != 0) // Data mapping failed.
+///       return res;
+///   }
+///   // Delete the array section.
+///   if (size > 1 && maptype.IsDelete) {
+///     res = __tgt_target_data_mapper(device_id, /*arg_num*/1, &base_ptr, &ptr,
+///                                    size*sizeof(Ty), maptype, null);
 ///     if (res != 0) // Data mapping failed.
 ///       return res;
 ///   }
@@ -8541,17 +8550,22 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
   llvm::Value *MapType = MapperCGF.EmitLoadOfScalar(
       MapperCGF.GetAddrOfLocalVar(&MapTypeArg), /*Volatile=*/false,
       C.getPointerType(Int64Ty), Loc);
+  // Prepare some common arguments.
+  llvm::Value *DeviceID = MapperCGF.EmitLoadOfScalar(
+      MapperCGF.GetAddrOfLocalVar(&DeviceIdArg), /*Volatile=*/false,
+      C.getPointerType(Int64Ty), Loc);
+  llvm::Value *BasePtr = MapperCGF.GetAddrOfLocalVar(&BasePtrArg).getPointer();
 
   // Evaluate if this is an array section.
-  llvm::BasicBlock *IsDeleteBB =
+  llvm::BasicBlock *IsNotDeleteBB =
       MapperCGF.createBasicBlock("omp.arrayinit.evaldelete");
   llvm::BasicBlock *ArrayInitBB = MapperCGF.createBasicBlock("omp.arrayinit");
   llvm::BasicBlock *HeadBB = MapperCGF.createBasicBlock("omp.arraymap.head");
   llvm::Value *IsArray = MapperCGF.Builder.CreateICmpSGE(
       Size, MapperCGF.Builder.getInt64(1), "omp.arrayinit.isarray");
-  MapperCGF.Builder.CreateCondBr(IsArray, IsDeleteBB, HeadBB);
+  MapperCGF.Builder.CreateCondBr(IsArray, IsNotDeleteBB, HeadBB);
   // Evaluate if we are going to delete this section.
-  MapperCGF.EmitBlock(IsDeleteBB);
+  MapperCGF.EmitBlock(IsNotDeleteBB);
   llvm::Value *DeleteBit = MapperCGF.Builder.CreateAnd(
       MapType,
       MapperCGF.Builder.getInt64(MappableExprsHandler::OMP_MAP_DELETE));
@@ -8561,64 +8575,15 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
 
   // Allocate the space if this is an array.
   MapperCGF.EmitBlock(ArrayInitBB);
-  llvm::Value *DeviceID = MapperCGF.EmitLoadOfScalar(
-      MapperCGF.GetAddrOfLocalVar(&DeviceIdArg), /*Volatile=*/false,
-      C.getPointerType(Int64Ty), Loc);
-  llvm::Value *BasePtr = MapperCGF.GetAddrOfLocalVar(&BasePtrArg).getPointer();
-  // Prepare the arg_size argument.
-  llvm::Value *ArraySize = MapperCGF.Builder.CreateMul(
-      Size, MapperCGF.Builder.getInt64(ElementSize.getQuantity()));
-  llvm::APInt PointerNumAP(32, 1, /*isSigned=*/true);
-  QualType SizeArrayType =
-      C.getConstantArrayType(C.getSizeType(), PointerNumAP, ArrayType::Normal,
-                             /*IndexTypeQuals=*/0);
-  llvm::Value *InitSizesArrayStorage =
-      MapperCGF.CreateMemTemp(SizeArrayType, ".init.offload_sizes")
-          .getPointer();
-  llvm::Value *InitSizesArrayArg = MapperCGF.Builder.CreateConstInBoundsGEP2_32(
-      llvm::ArrayType::get(CGM.SizeTy, 1), InitSizesArrayStorage, /*Idx0=*/0,
-      /*Idx1=*/0);
-  Address InitSizesArrayAddr(InitSizesArrayArg,
-                             C.getTypeAlignInChars(C.getSizeType()));
-  MapperCGF.EmitStoreOfScalar(ArraySize, InitSizesArrayAddr, /*Volatile=*/false,
-                              Int64Ty);
-  // Prepare the arg_type argument.
-  QualType MapArrayType =
-      C.getConstantArrayType(Int64Ty, PointerNumAP, ArrayType::Normal,
-                             /*IndexTypeQuals=*/0);
-  llvm::Value *InitMapTypeArrayStorage =
-      MapperCGF.CreateMemTemp(MapArrayType, ".init.offload_maptypes")
-          .getPointer();
-  llvm::Value *InitMapTypeArg = MapperCGF.Builder.CreateConstInBoundsGEP2_32(
-      llvm::ArrayType::get(CGM.Int64Ty, 1), InitMapTypeArrayStorage, /*Idx0=*/0,
-      /*Idx1=*/0);
-  Address InitMapTypeArrayAddr(InitMapTypeArg, C.getTypeAlignInChars(Int64Ty));
-  // Remove OMP_MAP_TO, OMP_MAP_FROM, and OMP_MAP_TO from the map type, so that
-  // it achieves memory allocation purpose only.
-  llvm::Value *InitMapType = MapperCGF.Builder.CreateAnd(
-      MapType,
-      MapperCGF.Builder.getInt64(~(MappableExprsHandler::OMP_MAP_TO |
-                                   MappableExprsHandler::OMP_MAP_FROM |
-                                   MappableExprsHandler::OMP_MAP_DELETE)));
-  MapperCGF.EmitStoreOfScalar(InitMapType, InitMapTypeArrayAddr,
-                              /*Volatile=*/false, Int64Ty);
-  llvm::Value *ArrayInitOffloadingArgs[] = {
-      DeviceID,
-      /*arg_num*/ MapperCGF.Builder.getInt32(1),
-      BasePtr,
-      Ptr,
-      InitSizesArrayArg,
-      InitMapTypeArg,
-      NullMapperArrayArg};
-  llvm::Value *InitReturn = MapperCGF.EmitRuntimeCall(
-      createRuntimeFunction(NoWait ? OMPRTL__tgt_target_data_mapper_nowait
-                                   : OMPRTL__tgt_target_data_mapper),
-      ArrayInitOffloadingArgs);
+  llvm::Value *InitReturn =
+      emitUDMapperArrayInitOrDel(MapperCGF, DeviceID, BasePtr, Ptr, Size,
+                                 MapType, ElementSize, /*IsInit*/ true, NoWait);
 
   // Jump to the function end if the return value indicates data mapping failed.
   llvm::BasicBlock *InitErrorBB =
       MapperCGF.createBasicBlock("omp.arrayinit.error");
-  llvm::BasicBlock *DoneBB = MapperCGF.createBasicBlock("omp.arraymap.done");
+  llvm::BasicBlock *ExitBB = MapperCGF.createBasicBlock("omp.arraymap.exit");
+  llvm::BasicBlock *DoneBB = MapperCGF.createBasicBlock("omp.done");
   llvm::Value *IsInitFailed = MapperCGF.Builder.CreateIsNotNull(InitReturn);
   MapperCGF.Builder.CreateCondBr(IsInitFailed, InitErrorBB, HeadBB);
   MapperCGF.EmitBlock(InitErrorBB);
@@ -8704,14 +8669,101 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
   PtrPHI->addIncoming(PtrNext, CorrectBB);
   llvm::Value *IsDone =
       MapperCGF.Builder.CreateICmpEQ(PtrNext, PtrEnd, "omp.arraymap.isdone");
-  MapperCGF.Builder.CreateCondBr(IsDone, DoneBB, BodyBB);
+  MapperCGF.Builder.CreateCondBr(IsDone, ExitBB, BodyBB);
 
-  // Emit the loop exit block.
+  // Delete the array section if specified by the input map type.
+  MapperCGF.EmitBlock(ExitBB);
+  llvm::BasicBlock *IsDeleteBB =
+      MapperCGF.createBasicBlock("omp.arraydel.evaldelete");
+  llvm::BasicBlock *ArrayDelBB = MapperCGF.createBasicBlock("omp.arraydel");
+  MapperCGF.Builder.CreateCondBr(IsArray, IsDeleteBB, DoneBB);
+  MapperCGF.EmitBlock(IsDeleteBB);
+  llvm::Value *DB = MapperCGF.Builder.CreateAnd(
+      MapType,
+      MapperCGF.Builder.getInt64(MappableExprsHandler::OMP_MAP_DELETE));
+  llvm::Value *IsDelete =
+      MapperCGF.Builder.CreateIsNotNull(DB, "omp.arraydel.isdelete");
+  MapperCGF.Builder.CreateCondBr(IsDelete, ArrayDelBB, DoneBB);
+  MapperCGF.EmitBlock(ArrayDelBB);
+  llvm::Value *DelReturn = emitUDMapperArrayInitOrDel(
+      MapperCGF, DeviceID, BasePtr, Ptr, Size, MapType, ElementSize,
+      /*IsInit*/ false, NoWait);
+
+  // Jump to the function end if the return value indicates data mapping failed.
+  llvm::BasicBlock *DelErrorBB =
+      MapperCGF.createBasicBlock("omp.arraydel.error");
+  llvm::Value *IsDelFailed = MapperCGF.Builder.CreateIsNotNull(DelReturn);
+  MapperCGF.Builder.CreateCondBr(IsDelFailed, DelErrorBB, DoneBB);
+  MapperCGF.EmitBlock(DelErrorBB);
+  MapperCGF.EmitStoreOfScalar(DelReturn, MapperCGF.ReturnValue,
+                              /*Volatile=*/false, C.IntTy);
+
+  // Emit the function exit block.
   MapperCGF.EmitBlock(DoneBB, /*IsFinished=*/true);
   MapperCGF.FinishFunction();
 
   // Add the generated mapper function to UDMMap.
   UDMMap.try_emplace(D, Fn);
+}
+
+// Emit the array initialization or deletion portion for user-defined mapper
+// code generation.
+llvm::Value *CGOpenMPRuntime::emitUDMapperArrayInitOrDel(
+    CodeGenFunction &MapperCGF, llvm::Value *DeviceID, llvm::Value *BasePtr,
+    llvm::Value *Ptr, llvm::Value *Size, llvm::Value *MapType,
+    CharUnits ElementSize, bool IsInit, bool NoWait) {
+  ASTContext &C = CGM.getContext();
+  QualType Int64Ty = C.getIntTypeForBitwidth(/*DestWidth*/ 64, /*Signed*/ true);
+  std::string Prefix = IsInit ? ".init" : ".del";
+  // Prepare the size argument.
+  llvm::Value *ArraySize = MapperCGF.Builder.CreateMul(
+      Size, MapperCGF.Builder.getInt64(ElementSize.getQuantity()));
+  llvm::APInt PointerNumAP(32, 1, /*isSigned=*/true);
+  QualType SizeArrayType =
+      C.getConstantArrayType(C.getSizeType(), PointerNumAP, ArrayType::Normal,
+                             /*IndexTypeQuals=*/0);
+  llvm::Value *SizesArrayStorage =
+      MapperCGF.CreateMemTemp(SizeArrayType, Prefix + ".offload_sizes")
+          .getPointer();
+  llvm::Value *SizesArrayArg = MapperCGF.Builder.CreateConstInBoundsGEP2_32(
+      llvm::ArrayType::get(CGM.SizeTy, 1), SizesArrayStorage, /*Idx0=*/0,
+      /*Idx1=*/0);
+  Address SizesArrayAddr(SizesArrayArg, C.getTypeAlignInChars(C.getSizeType()));
+  MapperCGF.EmitStoreOfScalar(ArraySize, SizesArrayAddr, /*Volatile=*/false,
+                              Int64Ty);
+  // Prepare the map type argument.
+  QualType MapArrayType =
+      C.getConstantArrayType(Int64Ty, PointerNumAP, ArrayType::Normal,
+                             /*IndexTypeQuals=*/0);
+  llvm::Value *MapTypeArrayStorage =
+      MapperCGF.CreateMemTemp(MapArrayType, Prefix + ".offload_maptypes")
+          .getPointer();
+  llvm::Value *MapTypeArg = MapperCGF.Builder.CreateConstInBoundsGEP2_32(
+      llvm::ArrayType::get(CGM.Int64Ty, 1), MapTypeArrayStorage, /*Idx0=*/0,
+      /*Idx1=*/0);
+  Address MapTypeArrayAddr(MapTypeArg, C.getTypeAlignInChars(Int64Ty));
+  // Remove OMP_MAP_TO and OMP_MAP_FROM from the map type, so that it achieves
+  // memory allocation/deletion purpose only.
+  llvm::Value *ArrayMapType = MapperCGF.Builder.CreateAnd(
+      MapType,
+      MapperCGF.Builder.getInt64(~(MappableExprsHandler::OMP_MAP_TO |
+                                   MappableExprsHandler::OMP_MAP_FROM)));
+  MapperCGF.EmitStoreOfScalar(ArrayMapType, MapTypeArrayAddr,
+                              /*Volatile=*/false, Int64Ty);
+  llvm::Value *NullMapperArrayArg =
+      llvm::ConstantPointerNull::get(CGM.VoidPtrPtrTy);
+  llvm::Value *OffloadingArgs[] = {
+      DeviceID,
+      /*arg_num*/ MapperCGF.Builder.getInt32(1),
+      BasePtr,
+      Ptr,
+      SizesArrayArg,
+      MapTypeArg,
+      NullMapperArrayArg};
+  return MapperCGF.EmitRuntimeCall(
+      createRuntimeFunction(NoWait ? OMPRTL__tgt_target_data_mapper_nowait
+                                   : OMPRTL__tgt_target_data_mapper),
+      OffloadingArgs);
 }
 
 void CGOpenMPRuntime::emitTargetNumIterationsCall(
