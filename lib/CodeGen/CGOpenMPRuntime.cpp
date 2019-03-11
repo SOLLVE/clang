@@ -8420,7 +8420,8 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
                                /*Id=*/nullptr, C.VoidPtrTy,
                                ImplicitParamDecl::Other);
   ImplicitParamDecl PtrArg(C, /*DC=*/nullptr, MapperVarDecl->getLocation(),
-                           /*Id=*/nullptr, PtrTy, ImplicitParamDecl::Other);
+                           /*Id=*/nullptr, C.VoidPtrTy,
+                           ImplicitParamDecl::Other);
   ImplicitParamDecl SizeArg(C, Int64Ty, ImplicitParamDecl::Other);
   ImplicitParamDecl MapTypeArg(C, Int64Ty, ImplicitParamDecl::Other);
   ImplicitParamDecl MapperArg(C, C.VoidPtrTy, ImplicitParamDecl::Other);
@@ -8450,7 +8451,9 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
   llvm::Value *Size = MapperCGF.EmitLoadOfScalar(
       MapperCGF.GetAddrOfLocalVar(&SizeArg), /*Volatile=*/false,
       C.getPointerType(Int64Ty), Loc);
-  llvm::Value *PtrBegin = MapperCGF.GetAddrOfLocalVar(&PtrArg).getPointer();
+  llvm::Value *Ptr = MapperCGF.GetAddrOfLocalVar(&PtrArg).getPointer();
+  llvm::Value *PtrBegin = MapperCGF.Builder.CreateBitCast(
+      Ptr, CGM.getTypes().ConvertTypeForMem(C.getPointerType(PtrTy)));
   llvm::Value *PtrEnd = MapperCGF.Builder.CreateGEP(PtrBegin, Size);
   llvm::Value *NullMapperArrayArg =
       llvm::ConstantPointerNull::get(CGM.VoidPtrPtrTy);
@@ -8468,8 +8471,6 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
       MapperCGF.GetAddrOfLocalVar(&DeviceIdArg), /*Volatile=*/false,
       C.getPointerType(Int64Ty), Loc);
   llvm::Value *BasePtr = MapperCGF.GetAddrOfLocalVar(&BasePtrArg).getPointer();
-  llvm::Value *PtrBeginBC =
-      MapperCGF.Builder.CreateBitCast(PtrBegin, CGM.VoidPtrPtrTy);
   // Prepare the arg_size argument.
   llvm::Value *ArraySize = MapperCGF.Builder.CreateMul(
       Size, MapperCGF.Builder.getInt64(ElementSize.getQuantity()));
@@ -8514,7 +8515,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
       DeviceID,
       /*arg_num*/ MapperCGF.Builder.getInt32(1),
       BasePtr,
-      PtrBeginBC,
+      Ptr,
       InitSizesArrayArg,
       InitMapTypeArg,
       NullMapperArrayArg};
