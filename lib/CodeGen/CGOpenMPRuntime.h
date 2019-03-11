@@ -786,8 +786,7 @@ public:
   getUserDefinedReduction(const OMPDeclareReductionDecl *D);
 
   /// Emit code for the user defined mapper construct.
-  virtual void emitUserDefinedMapper(CodeGenFunction *CGF,
-                                     const OMPDeclareMapperDecl *D);
+  virtual void emitUserDefinedMapper(const OMPDeclareMapperDecl *D);
 
   /// Emits outlined function for the specified OpenMP parallel directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,
