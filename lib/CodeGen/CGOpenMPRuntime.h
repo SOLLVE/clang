@@ -2074,6 +2074,9 @@ public:
                                   bool IsOffloadEntry,
                                   const RegionCodeGenTy &CodeGen) override;
 
+  /// Emit code for the user defined mapper construct.
+  void emitUserDefinedMapper(const OMPDeclareMapperDecl *D);
+
   /// Emit the target offloading code associated with \a D. The emitted
   /// code attempts offloading the execution to the device, an the event of
   /// a failure it executes the host version outlined in \a OutlinedFn.
