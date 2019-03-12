@@ -8467,7 +8467,7 @@ getNestedDistributeDirective(ASTContext &Ctx, const OMPExecutableDirective &D) {
 /// pattern in the example below.
 /// \code
 /// int .omp_mapper_<mapper_id>.(int64_t device_id, Ty *base_ptr, Ty *ptr,
-///                              int64_t size, int64_t maptype) {
+///                              size_t size, int64_t maptype) {
 ///   // Allocate space for an array section first.
 ///   if (size > 1 && !maptype.IsDelete) {
 ///     res = __tgt_target_data_mapper(device_id, /*arg_num*/1, &base_ptr, &ptr,
@@ -8498,6 +8498,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
   ASTContext &C = CGM.getContext();
   QualType Ty = D->getType();
   QualType PtrTy = C.getPointerType(Ty).withRestrict();
+  QualType SizeTy = C.getSizeType();
   QualType Int64Ty = C.getIntTypeForBitwidth(/*DestWidth*/ 64, /*Signed*/ true);
   auto *MapperVarDecl =
       cast<VarDecl>(cast<DeclRefExpr>(D->getMapperVarRef())->getDecl());
@@ -8514,7 +8515,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
   ImplicitParamDecl PtrArg(C, /*DC=*/nullptr, MapperVarDecl->getLocation(),
                            /*Id=*/nullptr, C.VoidPtrTy,
                            ImplicitParamDecl::Other);
-  ImplicitParamDecl SizeArg(C, Int64Ty, ImplicitParamDecl::Other);
+  ImplicitParamDecl SizeArg(C, SizeTy, ImplicitParamDecl::Other);
   ImplicitParamDecl MapTypeArg(C, Int64Ty, ImplicitParamDecl::Other);
   FunctionArgList Args;
   Args.push_back(&DeviceIdArg);
@@ -8540,7 +8541,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
   // Compute the starting and end addreses of array elements.
   llvm::Value *Size = MapperCGF.EmitLoadOfScalar(
       MapperCGF.GetAddrOfLocalVar(&SizeArg), /*Volatile=*/false,
-      C.getPointerType(Int64Ty), Loc);
+      C.getPointerType(SizeTy), Loc);
   llvm::Value *Ptr = MapperCGF.GetAddrOfLocalVar(&PtrArg).getPointer();
   llvm::Value *PtrBegin = MapperCGF.Builder.CreateBitCast(
       Ptr, CGM.getTypes().ConvertTypeForMem(C.getPointerType(PtrTy)));
@@ -8562,7 +8563,8 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
   llvm::BasicBlock *ArrayInitBB = MapperCGF.createBasicBlock("omp.arrayinit");
   llvm::BasicBlock *HeadBB = MapperCGF.createBasicBlock("omp.arraymap.head");
   llvm::Value *IsArray = MapperCGF.Builder.CreateICmpSGE(
-      Size, MapperCGF.Builder.getInt64(1), "omp.arrayinit.isarray");
+      Size, MapperCGF.Builder.getIntN(C.getTypeSize(SizeTy), 1),
+      "omp.arrayinit.isarray");
   MapperCGF.Builder.CreateCondBr(IsArray, IsNotDeleteBB, HeadBB);
   // Evaluate if we are going to delete this section.
   MapperCGF.EmitBlock(IsNotDeleteBB);
@@ -8716,8 +8718,9 @@ llvm::Value *CGOpenMPRuntime::emitUDMapperArrayInitOrDel(
   QualType Int64Ty = C.getIntTypeForBitwidth(/*DestWidth*/ 64, /*Signed*/ true);
   std::string Prefix = IsInit ? ".init" : ".del";
   // Prepare the size argument.
+  unsigned SizeTyWidth = C.getTypeSize(C.getSizeType());
   llvm::Value *ArraySize = MapperCGF.Builder.CreateMul(
-      Size, MapperCGF.Builder.getInt64(ElementSize.getQuantity()));
+      Size, MapperCGF.Builder.getIntN(SizeTyWidth, ElementSize.getQuantity()));
   llvm::APInt PointerNumAP(32, 1, /*isSigned=*/true);
   QualType SizeArrayType =
       C.getConstantArrayType(C.getSizeType(), PointerNumAP, ArrayType::Normal,
@@ -8730,7 +8733,7 @@ llvm::Value *CGOpenMPRuntime::emitUDMapperArrayInitOrDel(
       /*Idx1=*/0);
   Address SizesArrayAddr(SizesArrayArg, C.getTypeAlignInChars(C.getSizeType()));
   MapperCGF.EmitStoreOfScalar(ArraySize, SizesArrayAddr, /*Volatile=*/false,
-                              Int64Ty);
+                              C.getSizeType());
   // Prepare the map type argument.
   QualType MapArrayType =
       C.getConstantArrayType(Int64Ty, PointerNumAP, ArrayType::Normal,
