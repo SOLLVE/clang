@@ -8463,8 +8463,21 @@ getNestedDistributeDirective(ASTContext &Ctx, const OMPExecutableDirective &D) {
   return nullptr;
 }
 
-/// Emit the user-defined mapper function. The code generation follows the
-/// pattern in the example below.
+/// Emit code for the user defined mapper construct.
+void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
+  if (UDMMap.count(D) > 0)
+    return;
+  // Generate a synchronous mapper function.
+  llvm::Function *SyncFn = emitUDMapperFunc(D, /*NoWait=*/false);
+  // Generate an asynchronous mapper function.
+  llvm::Function *AsyncFn = emitUDMapperFunc(D, /*NoWait=*/true);
+  // Add the generated mapper functions to UDMMap.
+  UDMMap.try_emplace(D, SyncFn, AsyncFn);
+}
+
+/// Emit the user-defined mapper function. Whether it is synchronous or
+/// asynchronous depends on \a NoWait. The code generation follows the pattern
+/// in the example below.
 /// \code
 /// int .omp_mapper_<mapper_id>.(int64_t device_id, Ty *base_ptr, Ty *ptr,
 ///                              size_t size, int64_t maptype) {
@@ -8492,20 +8505,17 @@ getNestedDistributeDirective(ASTContext &Ctx, const OMPExecutableDirective &D) {
 ///   }
 /// }
 /// \endcode
-void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
-  if (UDMMap.count(D) > 0)
-    return;
+llvm::Function *CGOpenMPRuntime::emitUDMapperFunc(const OMPDeclareMapperDecl *D,
+                                                  bool NoWait) {
   ASTContext &C = CGM.getContext();
   QualType Ty = D->getType();
   QualType PtrTy = C.getPointerType(Ty).withRestrict();
   QualType SizeTy = C.getSizeType();
-  QualType Int64Ty = C.getIntTypeForBitwidth(/*DestWidth*/ 64, /*Signed*/ true);
+  QualType Int64Ty = C.getIntTypeForBitwidth(/*DestWidth=*/64, /*Signed=*/true);
   auto *MapperVarDecl =
       cast<VarDecl>(cast<DeclRefExpr>(D->getMapperVarRef())->getDecl());
   SourceLocation Loc = D->getLocation();
   CharUnits ElementSize = C.getTypeSizeInChars(Ty);
-  // FIXME: need to have 2 calls to emit 2 functions.
-  bool NoWait = false;
 
   // Prepare mapper function arguments and attributes.
   ImplicitParamDecl DeviceIdArg(C, Int64Ty, ImplicitParamDecl::Other);
@@ -8526,7 +8536,8 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
   const CGFunctionInfo &FnInfo =
       CGM.getTypes().arrangeBuiltinFunctionDeclaration(C.IntTy, Args);
   llvm::FunctionType *FnTy = CGM.getTypes().GetFunctionType(FnInfo);
-  std::string Name = getName({"omp_mapper", D->getName()});
+  std::string Name = getName(
+      {"omp_mapper", Ty.getAsString(), D->getName(), NoWait ? "nowait." : ""});
   auto *Fn = llvm::Function::Create(FnTy, llvm::GlobalValue::InternalLinkage,
                                     Name, &CGM.getModule());
   CGM.SetInternalFunctionAttributes(GlobalDecl(), Fn, FnInfo);
@@ -8579,7 +8590,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
   MapperCGF.EmitBlock(ArrayInitBB);
   llvm::Value *InitReturn =
       emitUDMapperArrayInitOrDel(MapperCGF, DeviceID, BasePtr, Ptr, Size,
-                                 MapType, ElementSize, /*IsInit*/ true, NoWait);
+                                 MapType, ElementSize, /*IsInit=*/true, NoWait);
 
   // Jump to the function end if the return value indicates data mapping failed.
   llvm::BasicBlock *InitErrorBB =
@@ -8689,7 +8700,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
   MapperCGF.EmitBlock(ArrayDelBB);
   llvm::Value *DelReturn = emitUDMapperArrayInitOrDel(
       MapperCGF, DeviceID, BasePtr, Ptr, Size, MapType, ElementSize,
-      /*IsInit*/ false, NoWait);
+      /*IsInit=*/false, NoWait);
 
   // Jump to the function end if the return value indicates data mapping failed.
   llvm::BasicBlock *DelErrorBB =
@@ -8703,9 +8714,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
   // Emit the function exit block.
   MapperCGF.EmitBlock(DoneBB, /*IsFinished=*/true);
   MapperCGF.FinishFunction();
-
-  // Add the generated mapper function to UDMMap.
-  UDMMap.try_emplace(D, Fn);
+  return Fn;
 }
 
 // Emit the array initialization or deletion portion for user-defined mapper

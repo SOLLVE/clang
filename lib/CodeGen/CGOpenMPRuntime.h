@@ -346,8 +346,11 @@ private:
       FunctionUDRMapTy;
   FunctionUDRMapTy FunctionUDRMap;
   /// Map from the user-defined mapper declaration to its corresponding
-  /// function.
-  llvm::DenseMap<const OMPDeclareMapperDecl *, llvm::Function *> UDMMap;
+  /// functions. The first one is the synchronous version, while the second one
+  /// is the asynchronous version.
+  llvm::DenseMap<const OMPDeclareMapperDecl *,
+                 std::pair<llvm::Function *, llvm::Function *>>
+      UDMMap;
   /// Type kmp_critical_name, originally defined as typedef kmp_int32
   /// kmp_critical_name[8];
   llvm::ArrayType *KmpCriticalNameTy;
@@ -787,6 +790,11 @@ public:
 
   /// Emit code for the user defined mapper construct.
   virtual void emitUserDefinedMapper(const OMPDeclareMapperDecl *D);
+
+  /// Emit a function for a user defined mapper. Whether it is synchronous or
+  /// asynchronous depends on \a NoWait.
+  virtual llvm::Function *emitUDMapperFunc(const OMPDeclareMapperDecl *D,
+                                           bool NoWait);
 
   // Emit the array initialization or deletion portion for user-defined mapper
   // code generation.
