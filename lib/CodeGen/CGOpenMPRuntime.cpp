@@ -8538,6 +8538,7 @@ llvm::Function *CGOpenMPRuntime::emitUDMapperFunc(const OMPDeclareMapperDecl *D,
   llvm::FunctionType *FnTy = CGM.getTypes().GetFunctionType(FnInfo);
   std::string Name = getName(
       {"omp_mapper", Ty.getAsString(), D->getName(), NoWait ? "nowait." : ""});
+  std::replace(Name.begin(), Name.end(), ' ', '_');
   auto *Fn = llvm::Function::Create(FnTy, llvm::GlobalValue::InternalLinkage,
                                     Name, &CGM.getModule());
   CGM.SetInternalFunctionAttributes(GlobalDecl(), Fn, FnInfo);
