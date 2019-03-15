@@ -35,9 +35,53 @@ public:
 
 #pragma omp declare mapper(id: C s) map(s.a)
 
-// CHECK-LABEL: define {{.*}}i32 @.omp_mapper.id{{.*}}(i64, i8*, i8*, i{{64|32}}, i64)
+// CHECK-LABEL: define {{.*}}i32 @.omp_mapper.class_C.id{{.*}}(i64, i8*, i8*, i{{64|32}}, i64)
+// CHECK-DAG: store i64 %0, i64* [[DIDADDR:%[^,]+]]
+// CHECK-DAG: store i[[sz]] %3, i[[sz]]* [[SIZEADDR:%[^,]+]]
+// CHECK-DAG: store i64 %4, i64* [[TYPEADDR:%[^,]+]]
+// CHECK-DAG: store i8* %1, i8** [[BPTRADDR:%[^,]+]]
+// CHECK-DAG: store i8* %2, i8** [[VPTRADDR:%[^,]+]]
+// CHECK-DAG: store i32 0, i32* %retval
+// CHECK-DAG: [[SIZE:%.+]] = load i[[sz]], i[[sz]]* [[SIZEADDR]]
+// CHECK-DAG: [[TYPE:%.+]] = load i64, i64* [[TYPEADDR]]
+// CHECK-DAG: [[DID:%.+]] = load i64, i64* [[DIDADDR]]
+// CHECK-DAG: [[PTRBEGIN:%.+]] = bitcast i8** [[VPTRADDR]] to %class.C**
+// CHECK-DAG: [[PTREND:%.+]] = getelementptr %class.C*, %class.C** [[PTRBEGIN]], i[[sz]] [[SIZE]]
+// CHECK: [[ISARRAY:%.+]] = icmp sge i[[sz]] [[SIZE]], 1
+// CHECK: br i1 [[ISARRAY]], label %[[INITEVALDEL:[^,]+]], label %[[LHEAD:[^,]+]]
 
-// CHECK-LABEL: define void @{{.*}}foo{{.*}}
+// CHECK: [[INITEVALDEL]]
+// CHECK: [[TYPEDEL:%.+]] = and i64 [[TYPE]], 8
+// CHECK: [[ISNOTDEL:%.+]] = icmp eq i64 [[TYPEDEL]], 0
+// CHECK: br i1 [[ISNOTDEL]], label %[[INIT:[^,]+]], label %[[LHEAD:[^,]+]]
+// CHECK: [[INIT]]
+// CHECK: [[ASIZE:%.+]] = mul i[[sz]] [[SIZE]], 4
+// CHECK: [[ISIZEADDR:%.+]] = getelementptr inbounds [1 x i[[sz]]], [1 x i[[sz]]]* [[ISIZE:%.+]], i32 0, i32 0
+// CHECK: store i[[sz]] [[ASIZE]], i[[sz]]* [[ISIZEADDR]]
+// CHECK: [[ITYPEADDR:%.+]] = getelementptr inbounds [1 x i64], [1 x i64]* [[ITYPE:%.+]], i32 0, i32 0
+// CHECK: [[ITYPE:%.+]] = and i64 [[TYPE]], -4
+// CHECK: store i64 [[ITYPE]], i64* [[ITYPEADDR]]
+// CHECK: [[IRES:%.+]] = call i32 @__tgt_target_data_mapper(i64 [[DID]], i32 1, i8** [[BPTRADDR]], i8** [[VPTRADDR]], i[[sz]]* [[ISIZEADDR]], i64* [[ITYPEADDR]], i8** null)
+// CHECK: [[ISINITERR:%.+]] = icmp ne i32 [[IRES]], 0
+// CHECK: br i1 [[ISINITERR]], label %[[INITERR:[^,]+]], label %[[LHEAD:[^,]+]]
+// CHECK: [[INITERR]]
+// CHECK: store i32 [[IRES]], i32* %retval
+// CHECK: br label %[[DONE:[^,]+]]
+
+// CHECK: [[LHEAD]]
+// CHECK: [[ISEMPTY:%.+]] = icmp eq %class.C** [[PTRBEGIN]], [[PTREND]]
+// CHECK: br i1 [[ISEMPTY]], label %[[DONE]], label %[[LBODY:[^,]+]]
+// CHECK: [[LBODY]]
+// CHECK: [[PTR:%.+]] = phi %class.C** [ [[PTRBEGIN]], %[[LHEAD]] ], [ [[PTRNEXT:%.+]], %[[LCORRECT:[^,]+]] ]
+// CHECK: [[OBJ:%.+]] = load %class.C*, %class.C** [[PTR]]
+// CHECK: [[APTR:%.+]] = getelementptr inbounds %class.C, %class.C* [[OBJ]], i32 0, i32 0
+// CHECK: [[LCORRECT]]
+
+// CHECK: [[DONE]]
+
+// CHECK-LABEL: define {{.*}}i32 @.omp_mapper.class_C.id{{.*}}nowait{{.*}}(i64, i8*, i8*, i{{64|32}}, i64)
+
+// CHECK-LABEL: define {{.*}}void @{{.*}}foo{{.*}}
 void foo(int a){
   int i = a;
   C c;
