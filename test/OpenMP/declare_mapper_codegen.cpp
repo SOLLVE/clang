@@ -1,10 +1,10 @@
 ///==========================================================================///
-// RUN: %clang_cc1 -verify -fopenmp -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm -femit-all-decls -disable-llvm-passes %s -o - | FileCheck %s
+// RUN: %clang_cc1 -verify -fopenmp -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm -femit-all-decls -disable-llvm-passes %s -o - | FileCheck --check-prefix CHECK --check-prefix CHECK-64 %s
 // RUN: %clang_cc1 -fopenmp -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -emit-pch -femit-all-decls -disable-llvm-passes -o %t %s
-// RUN: %clang_cc1 -fopenmp -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s
-// RUN: %clang_cc1 -verify -fopenmp -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -emit-llvm -femit-all-decls -disable-llvm-passes %s -o - | FileCheck %s
+// RUN: %clang_cc1 -fopenmp -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck --check-prefix CHECK --check-prefix CHECK-64 %s
+// RUN: %clang_cc1 -verify -fopenmp -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -emit-llvm -femit-all-decls -disable-llvm-passes %s -o - | FileCheck --check-prefix CHECK --check-prefix CHECK-32 %s
 // RUN: %clang_cc1 -fopenmp -fopenmp-targets=i386-pc-linux-gnu -x c++ -std=c++11 -triple i386-unknown-unknown -emit-pch -femit-all-decls -disable-llvm-passes -o %t %s
-// RUN: %clang_cc1 -fopenmp -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s
+// RUN: %clang_cc1 -fopenmp -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck --check-prefix CHECK --check-prefix CHECK-32 %s
 
 // RUN: %clang_cc1 -verify -fopenmp-simd -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm -femit-all-decls -disable-llvm-passes %s -o - | FileCheck --check-prefix SIMD-ONLY0 %s
 // RUN: %clang_cc1 -fopenmp-simd -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -emit-pch -femit-all-decls -disable-llvm-passes -o %t %s
@@ -35,6 +35,7 @@ public:
 
 #pragma omp declare mapper(id: C s) map(s.a)
 
+// Synchronous version of mapper function.
 // CHECK-LABEL: define {{.*}}i32 @.omp_mapper.class_C.id{{.*}}(i64, i8*, i8*, i{{64|32}}, i64)
 // CHECK-DAG: store i64 %0, i64* [[DIDADDR:%[^,]+]]
 // CHECK-DAG: store i[[sz]] %3, i[[sz]]* [[SIZEADDR:%[^,]+]]
@@ -55,12 +56,12 @@ public:
 // CHECK: [[ISNOTDEL:%.+]] = icmp eq i64 [[TYPEDEL]], 0
 // CHECK: br i1 [[ISNOTDEL]], label %[[INIT:[^,]+]], label %[[LHEAD:[^,]+]]
 // CHECK: [[INIT]]
-// CHECK: [[ASIZE:%.+]] = mul i[[sz]] [[SIZE]], 4
-// CHECK: [[ISIZEADDR:%.+]] = getelementptr inbounds [1 x i[[sz]]], [1 x i[[sz]]]* [[ISIZE:%.+]], i32 0, i32 0
-// CHECK: store i[[sz]] [[ASIZE]], i[[sz]]* [[ISIZEADDR]]
-// CHECK: [[ITYPEADDR:%.+]] = getelementptr inbounds [1 x i64], [1 x i64]* [[ITYPE:%.+]], i32 0, i32 0
-// CHECK: [[ITYPE:%.+]] = and i64 [[TYPE]], -4
-// CHECK: store i64 [[ITYPE]], i64* [[ITYPEADDR]]
+// CHECK: [[ARRSIZE:%.+]] = mul i[[sz]] [[SIZE]], 4
+// CHECK-DAG: store i[[sz]] [[ARRSIZE]], i[[sz]]* [[ISIZEADDR:[^,]+]]
+// CHECK-DAG: [[ISIZEADDR]] = getelementptr inbounds [1 x i[[sz]]], [1 x i[[sz]]]* [[ISIZE:%.+]], i32 0, i32 0
+// CHECK-DAG: [[ITYPE:%.+]] = and i64 [[TYPE]], -4
+// CHECK-DAG: store i64 [[ITYPE]], i64* [[ITYPEADDR:[^,]+]]
+// CHECK-DAG: [[ITYPEADDR]] = getelementptr inbounds [1 x i64], [1 x i64]* [[ITYPE:%.+]], i32 0, i32 0
 // CHECK: [[IRES:%.+]] = call i32 @__tgt_target_data_mapper(i64 [[DID]], i32 1, i8** [[BPTRADDR]], i8** [[VPTRADDR]], i[[sz]]* [[ISIZEADDR]], i64* [[ITYPEADDR]], i8** null)
 // CHECK: [[ISINITERR:%.+]] = icmp ne i32 [[IRES]], 0
 // CHECK: br i1 [[ISINITERR]], label %[[INITERR:[^,]+]], label %[[LHEAD:[^,]+]]
@@ -74,12 +75,189 @@ public:
 // CHECK: [[LBODY]]
 // CHECK: [[PTR:%.+]] = phi %class.C** [ [[PTRBEGIN]], %[[LHEAD]] ], [ [[PTRNEXT:%.+]], %[[LCORRECT:[^,]+]] ]
 // CHECK: [[OBJ:%.+]] = load %class.C*, %class.C** [[PTR]]
-// CHECK: [[APTR:%.+]] = getelementptr inbounds %class.C, %class.C* [[OBJ]], i32 0, i32 0
+// CHECK-DAG: [[ABEGIN:%.+]] = getelementptr inbounds %class.C, %class.C* [[OBJ]], i32 0, i32 0
+// CHECK-DAG: [[AEND:%.+]] = getelementptr i32, i32* [[ABEGIN]], i32 1
+// CHECK-DAG: [[ABEGINV:%.+]] = bitcast i32* [[ABEGIN]] to i8*
+// CHECK-DAG: [[AENDV:%.+]] = bitcast i32* [[AEND]] to i8*
+// CHECK-DAG: [[ABEGINI:%.+]] = ptrtoint i8* [[ABEGINV]] to i64
+// CHECK-DAG: [[AENDI:%.+]] = ptrtoint i8* [[AENDV]] to i64
+// CHECK-DAG: [[ASIZE:%.+]] = sub i64 [[AENDI]], [[ABEGINI]]
+// CHECK-DAG: [[AUSIZE:%.+]] = sdiv exact i64 [[ASIZE]], ptrtoint (i8* getelementptr (i8, i8* null, i32 1) to i64)
+// CHECK-32-DAG: [[AUSIZE32:%.+]] = trunc i64 [[AUSIZE]] to i32
+// CHECK-64-DAG: store i[[sz]] [[AUSIZE]], i[[sz]]* [[SIZEADDR0:%[^,]+]]
+// CHECK-32-DAG: store i[[sz]] [[AUSIZE32]], i[[sz]]* [[SIZEADDR0:%[^,]+]]
+// CHECK-DAG: [[SIZEADDR0]] = getelementptr inbounds [2 x i[[sz]]], [2 x i[[sz]]]* [[SIZEADDR:%[^,]+]], i32 0, i32 0
+// CHECK-DAG: store %class.C* [[OBJ]], %class.C** [[BPTRADDR0BC:%[^,]+]]
+// CHECK-DAG: [[BPTRADDR0BC]] = bitcast i8** [[BPTRADDR0:%.+]] to %class.C**
+// CHECK-DAG: [[BPTRADDR0]] = getelementptr inbounds [2 x i8*], [2 x i8*]* [[LBPTRADDR:%[^,]+]], i32 0, i32 0
+// CHECK-DAG: store i32* [[ABEGIN]], i32** [[PTRADDR0BC:%[^,]+]]
+// CHECK-DAG: [[PTRADDR0BC]] = bitcast i8** [[PTRADDR0:%.+]] to i32**
+// CHECK-DAG: [[PTRADDR0]] = getelementptr inbounds [2 x i8*], [2 x i8*]* [[PTRADDR:%[^,]+]], i32 0, i32 0
+// CHECK-DAG: [[TYPE0:%.+]] = and i64 [[TYPE]], -4
+// CHECK-DAG: [[PHITYPE0:%.+]] = phi i64 [ [[TYPE0]],
+// CHECK-DAG: store i64 [[PHITYPE0]], i64* [[TYPEADDR0:%[^,]+]]
+// CHECK-DAG: [[TYPEADDR0]] = getelementptr inbounds [2 x i64], [2 x i64]* [[TYPEADDR:%[^,]+]], i32 0, i32 0
+// CHECK-DAG: [[BPTRADDR1:%.+]] = getelementptr inbounds [2 x i8*], [2 x i8*]* [[LBPTRADDR]], i32 0, i32 1
+// CHECK-DAG: [[BPTRADDR1BC:%.+]] = bitcast i8** [[BPTRADDR1]] to %class.C**
+// CHECK-DAG: store %class.C* [[OBJ]], %class.C** [[BPTRADDR1BC]]
+// CHECK-DAG: [[PTRADDR1:%.+]] = getelementptr inbounds [2 x i8*], [2 x i8*]* [[PTRADDR]], i32 0, i32 1
+// CHECK-DAG: [[PTRADDR1BC:%.+]] = bitcast i8** [[PTRADDR1]] to i32**
+// CHECK-DAG: store i32* [[ABEGIN]], i32** [[PTRADDR1BC]]
+// CHECK-DAG: [[SIZEADDR1:%.+]] = getelementptr inbounds [2 x i[[sz]]], [2 x i[[sz]]]* [[SIZEADDR]], i32 0, i32 1
+// CHECK-DAG: store i[[sz]] 4, i[[sz]]* [[SIZEADDR1]]
+// CHECK-DAG: [[TYPEADDR1:%.+]] = getelementptr inbounds [2 x i64], [2 x i64]* [[TYPEADDR]], i32 0, i32 1
+// CHECK-DAG: [[TYPE1:%.+]] = phi i64 [ {{.*}} [[TYPE]],
+// CHECK-DAG: store i64 [[TYPE1]], i64* [[TYPEADDR1]]
+// CHECK-DAG: [[ARGBPTR:%.+]] = getelementptr inbounds [2 x i8*], [2 x i8*]* [[LBPTRADDR]], i32 0, i32 0
+// CHECK-DAG: [[ARGPTR:%.+]] = getelementptr inbounds [2 x i8*], [2 x i8*]* [[PTRADDR]], i32 0, i32 0
+// CHECK-DAG: [[ARGSIZE:%.+]] = getelementptr inbounds [2 x i[[sz]]], [2 x i[[sz]]]* [[SIZEADDR]], i32 0, i32 0
+// CHECK-DAG: [[ARGTYPE:%.+]] = getelementptr inbounds [2 x i64], [2 x i64]* [[TYPEADDR]], i32 0, i32 0
+// CHECK: [[RES:%.+]] = call i32 @__tgt_target_data_mapper(i64 [[DID]], i32 2, i8** [[ARGBPTR]], i8** [[ARGPTR]], i[[sz]]* [[ARGSIZE]], i64* [[ARGTYPE]], i8** null)
+// CHECK: [[ISERR:%.+]] = icmp ne i32 [[RES]], 0
+// CHECK: br i1 [[ISERR]], label %[[LERR:[^,]+]], label %[[LCORRECT]]
+// CHECK: [[LERR]]
+// CHECK: store i32 [[RES]], i32* %retval
+// CHECK: br label %[[DONE]]
 // CHECK: [[LCORRECT]]
+// CHECK: [[PTRNEXT]] = getelementptr %class.C*, %class.C** [[PTR]], i32 1
+// CHECK: [[ISDONE:%.+]] = icmp eq %class.C** [[PTRNEXT]], [[PTREND]]
+// CHECK: br i1 [[ISDONE]], label %[[LEXIT:[^,]+]], label %[[LBODY]]
 
+// CHECK: [[LEXIT]]
+// CHECK: br i1 [[ISARRAY]], label %[[EVALDEL:[^,]+]], label %[[DONE]]
+// CHECK: [[EVALDEL]]
+// CHECK: [[TYPEDEL:%.+]] = and i64 [[TYPE]], 8
+// CHECK: [[ISDEL:%.+]] = icmp ne i64 [[TYPEDEL]], 0
+// CHECK: br i1 [[ISDEL]], label %[[DEL:[^,]+]], label %[[DONE]]
+// CHECK: [[DEL]]
+// CHECK: [[ARRSIZE:%.+]] = mul i[[sz]] [[SIZE]], 4
+// CHECK-DAG: store i[[sz]] [[ARRSIZE]], i[[sz]]* [[DSIZEADDR:%[^,]+]]
+// CHECK-DAG: [[DSIZEADDR]] = getelementptr inbounds [1 x i[[sz]]], [1 x i[[sz]]]* [[DSIZE:%.+]], i32 0, i32 0
+// CHECK-DAG: [[DTYPE:%.+]] = and i64 [[TYPE]], -4
+// CHECK-DAG: store i64 [[DTYPE]], i64* [[DTYPEADDR:%[^,]+]]
+// CHECK-DAG: [[DTYPEADDR]] = getelementptr inbounds [1 x i64], [1 x i64]* [[DTYPE:%.+]], i32 0, i32 0
+// CHECK: [[DRES:%.+]] = call i32 @__tgt_target_data_mapper(i64 [[DID]], i32 1, i8** [[BPTRADDR]], i8** [[VPTRADDR]], i[[sz]]* [[DSIZEADDR]], i64* [[DTYPEADDR]], i8** null)
+// CHECK: [[ISDELERR:%.+]] = icmp ne i32 [[DRES]], 0
+// CHECK: br i1 [[ISDELERR]], label %[[DELERR:[^,]+]], label %[[DONE]]
+// CHECK: [[DELERR]]
+// CHECK: store i32 [[DRES]], i32* %retval
+// CHECK: br label %[[DONE]]
 // CHECK: [[DONE]]
+// CHECK: [[RET:%.+]] = load i32, i32* %retval
+// CHECK: ret i32 [[RET]]
 
+
+// Asynchronous version of mapper function.
 // CHECK-LABEL: define {{.*}}i32 @.omp_mapper.class_C.id{{.*}}nowait{{.*}}(i64, i8*, i8*, i{{64|32}}, i64)
+// CHECK-DAG: store i64 %0, i64* [[DIDADDR:%[^,]+]]
+// CHECK-DAG: store i[[sz]] %3, i[[sz]]* [[SIZEADDR:%[^,]+]]
+// CHECK-DAG: store i64 %4, i64* [[TYPEADDR:%[^,]+]]
+// CHECK-DAG: store i8* %1, i8** [[BPTRADDR:%[^,]+]]
+// CHECK-DAG: store i8* %2, i8** [[VPTRADDR:%[^,]+]]
+// CHECK-DAG: store i32 0, i32* %retval
+// CHECK-DAG: [[SIZE:%.+]] = load i[[sz]], i[[sz]]* [[SIZEADDR]]
+// CHECK-DAG: [[TYPE:%.+]] = load i64, i64* [[TYPEADDR]]
+// CHECK-DAG: [[DID:%.+]] = load i64, i64* [[DIDADDR]]
+// CHECK-DAG: [[PTRBEGIN:%.+]] = bitcast i8** [[VPTRADDR]] to %class.C**
+// CHECK-DAG: [[PTREND:%.+]] = getelementptr %class.C*, %class.C** [[PTRBEGIN]], i[[sz]] [[SIZE]]
+// CHECK: [[ISARRAY:%.+]] = icmp sge i[[sz]] [[SIZE]], 1
+// CHECK: br i1 [[ISARRAY]], label %[[INITEVALDEL:[^,]+]], label %[[LHEAD:[^,]+]]
+
+// CHECK: [[INITEVALDEL]]
+// CHECK: [[TYPEDEL:%.+]] = and i64 [[TYPE]], 8
+// CHECK: [[ISNOTDEL:%.+]] = icmp eq i64 [[TYPEDEL]], 0
+// CHECK: br i1 [[ISNOTDEL]], label %[[INIT:[^,]+]], label %[[LHEAD:[^,]+]]
+// CHECK: [[INIT]]
+// CHECK: [[ARRSIZE:%.+]] = mul i[[sz]] [[SIZE]], 4
+// CHECK-DAG: store i[[sz]] [[ARRSIZE]], i[[sz]]* [[ISIZEADDR:[^,]+]]
+// CHECK-DAG: [[ISIZEADDR]] = getelementptr inbounds [1 x i[[sz]]], [1 x i[[sz]]]* [[ISIZE:%.+]], i32 0, i32 0
+// CHECK-DAG: [[ITYPE:%.+]] = and i64 [[TYPE]], -4
+// CHECK-DAG: store i64 [[ITYPE]], i64* [[ITYPEADDR:[^,]+]]
+// CHECK-DAG: [[ITYPEADDR]] = getelementptr inbounds [1 x i64], [1 x i64]* [[ITYPE:%.+]], i32 0, i32 0
+// CHECK: [[IRES:%.+]] = call i32 @__tgt_target_data_mapper_nowait(i64 [[DID]], i32 1, i8** [[BPTRADDR]], i8** [[VPTRADDR]], i[[sz]]* [[ISIZEADDR]], i64* [[ITYPEADDR]], i8** null)
+// CHECK: [[ISINITERR:%.+]] = icmp ne i32 [[IRES]], 0
+// CHECK: br i1 [[ISINITERR]], label %[[INITERR:[^,]+]], label %[[LHEAD:[^,]+]]
+// CHECK: [[INITERR]]
+// CHECK: store i32 [[IRES]], i32* %retval
+// CHECK: br label %[[DONE:[^,]+]]
+
+// CHECK: [[LHEAD]]
+// CHECK: [[ISEMPTY:%.+]] = icmp eq %class.C** [[PTRBEGIN]], [[PTREND]]
+// CHECK: br i1 [[ISEMPTY]], label %[[DONE]], label %[[LBODY:[^,]+]]
+// CHECK: [[LBODY]]
+// CHECK: [[PTR:%.+]] = phi %class.C** [ [[PTRBEGIN]], %[[LHEAD]] ], [ [[PTRNEXT:%.+]], %[[LCORRECT:[^,]+]] ]
+// CHECK: [[OBJ:%.+]] = load %class.C*, %class.C** [[PTR]]
+// CHECK-DAG: [[ABEGIN:%.+]] = getelementptr inbounds %class.C, %class.C* [[OBJ]], i32 0, i32 0
+// CHECK-DAG: [[AEND:%.+]] = getelementptr i32, i32* [[ABEGIN]], i32 1
+// CHECK-DAG: [[ABEGINV:%.+]] = bitcast i32* [[ABEGIN]] to i8*
+// CHECK-DAG: [[AENDV:%.+]] = bitcast i32* [[AEND]] to i8*
+// CHECK-DAG: [[ABEGINI:%.+]] = ptrtoint i8* [[ABEGINV]] to i64
+// CHECK-DAG: [[AENDI:%.+]] = ptrtoint i8* [[AENDV]] to i64
+// CHECK-DAG: [[ASIZE:%.+]] = sub i64 [[AENDI]], [[ABEGINI]]
+// CHECK-DAG: [[AUSIZE:%.+]] = sdiv exact i64 [[ASIZE]], ptrtoint (i8* getelementptr (i8, i8* null, i32 1) to i64)
+// CHECK-32-DAG: [[AUSIZE32:%.+]] = trunc i64 [[AUSIZE]] to i32
+// CHECK-64-DAG: store i[[sz]] [[AUSIZE]], i[[sz]]* [[SIZEADDR0:%[^,]+]]
+// CHECK-32-DAG: store i[[sz]] [[AUSIZE32]], i[[sz]]* [[SIZEADDR0:%[^,]+]]
+// CHECK-DAG: [[SIZEADDR0]] = getelementptr inbounds [2 x i[[sz]]], [2 x i[[sz]]]* [[SIZEADDR:%[^,]+]], i32 0, i32 0
+// CHECK-DAG: store %class.C* [[OBJ]], %class.C** [[BPTRADDR0BC:%[^,]+]]
+// CHECK-DAG: [[BPTRADDR0BC]] = bitcast i8** [[BPTRADDR0:%.+]] to %class.C**
+// CHECK-DAG: [[BPTRADDR0]] = getelementptr inbounds [2 x i8*], [2 x i8*]* [[LBPTRADDR:%[^,]+]], i32 0, i32 0
+// CHECK-DAG: store i32* [[ABEGIN]], i32** [[PTRADDR0BC:%[^,]+]]
+// CHECK-DAG: [[PTRADDR0BC]] = bitcast i8** [[PTRADDR0:%.+]] to i32**
+// CHECK-DAG: [[PTRADDR0]] = getelementptr inbounds [2 x i8*], [2 x i8*]* [[PTRADDR:%[^,]+]], i32 0, i32 0
+// CHECK-DAG: [[TYPE0:%.+]] = and i64 [[TYPE]], -4
+// CHECK-DAG: [[PHITYPE0:%.+]] = phi i64 [ [[TYPE0]],
+// CHECK-DAG: store i64 [[PHITYPE0]], i64* [[TYPEADDR0:%[^,]+]]
+// CHECK-DAG: [[TYPEADDR0]] = getelementptr inbounds [2 x i64], [2 x i64]* [[TYPEADDR:%[^,]+]], i32 0, i32 0
+// CHECK-DAG: [[BPTRADDR1:%.+]] = getelementptr inbounds [2 x i8*], [2 x i8*]* [[LBPTRADDR]], i32 0, i32 1
+// CHECK-DAG: [[BPTRADDR1BC:%.+]] = bitcast i8** [[BPTRADDR1]] to %class.C**
+// CHECK-DAG: store %class.C* [[OBJ]], %class.C** [[BPTRADDR1BC]]
+// CHECK-DAG: [[PTRADDR1:%.+]] = getelementptr inbounds [2 x i8*], [2 x i8*]* [[PTRADDR]], i32 0, i32 1
+// CHECK-DAG: [[PTRADDR1BC:%.+]] = bitcast i8** [[PTRADDR1]] to i32**
+// CHECK-DAG: store i32* [[ABEGIN]], i32** [[PTRADDR1BC]]
+// CHECK-DAG: [[SIZEADDR1:%.+]] = getelementptr inbounds [2 x i[[sz]]], [2 x i[[sz]]]* [[SIZEADDR]], i32 0, i32 1
+// CHECK-DAG: store i[[sz]] 4, i[[sz]]* [[SIZEADDR1]]
+// CHECK-DAG: [[TYPEADDR1:%.+]] = getelementptr inbounds [2 x i64], [2 x i64]* [[TYPEADDR]], i32 0, i32 1
+// CHECK-DAG: [[TYPE1:%.+]] = phi i64 [ {{.*}} [[TYPE]],
+// CHECK-DAG: store i64 [[TYPE1]], i64* [[TYPEADDR1]]
+// CHECK-DAG: [[ARGBPTR:%.+]] = getelementptr inbounds [2 x i8*], [2 x i8*]* [[LBPTRADDR]], i32 0, i32 0
+// CHECK-DAG: [[ARGPTR:%.+]] = getelementptr inbounds [2 x i8*], [2 x i8*]* [[PTRADDR]], i32 0, i32 0
+// CHECK-DAG: [[ARGSIZE:%.+]] = getelementptr inbounds [2 x i[[sz]]], [2 x i[[sz]]]* [[SIZEADDR]], i32 0, i32 0
+// CHECK-DAG: [[ARGTYPE:%.+]] = getelementptr inbounds [2 x i64], [2 x i64]* [[TYPEADDR]], i32 0, i32 0
+// CHECK: [[RES:%.+]] = call i32 @__tgt_target_data_mapper_nowait(i64 [[DID]], i32 2, i8** [[ARGBPTR]], i8** [[ARGPTR]], i[[sz]]* [[ARGSIZE]], i64* [[ARGTYPE]], i8** null)
+// CHECK: [[ISERR:%.+]] = icmp ne i32 [[RES]], 0
+// CHECK: br i1 [[ISERR]], label %[[LERR:[^,]+]], label %[[LCORRECT]]
+// CHECK: [[LERR]]
+// CHECK: store i32 [[RES]], i32* %retval
+// CHECK: br label %[[DONE]]
+// CHECK: [[LCORRECT]]
+// CHECK: [[PTRNEXT]] = getelementptr %class.C*, %class.C** [[PTR]], i32 1
+// CHECK: [[ISDONE:%.+]] = icmp eq %class.C** [[PTRNEXT]], [[PTREND]]
+// CHECK: br i1 [[ISDONE]], label %[[LEXIT:[^,]+]], label %[[LBODY]]
+
+// CHECK: [[LEXIT]]
+// CHECK: br i1 [[ISARRAY]], label %[[EVALDEL:[^,]+]], label %[[DONE]]
+// CHECK: [[EVALDEL]]
+// CHECK: [[TYPEDEL:%.+]] = and i64 [[TYPE]], 8
+// CHECK: [[ISDEL:%.+]] = icmp ne i64 [[TYPEDEL]], 0
+// CHECK: br i1 [[ISDEL]], label %[[DEL:[^,]+]], label %[[DONE]]
+// CHECK: [[DEL]]
+// CHECK: [[ARRSIZE:%.+]] = mul i[[sz]] [[SIZE]], 4
+// CHECK-DAG: store i[[sz]] [[ARRSIZE]], i[[sz]]* [[DSIZEADDR:%[^,]+]]
+// CHECK-DAG: [[DSIZEADDR]] = getelementptr inbounds [1 x i[[sz]]], [1 x i[[sz]]]* [[DSIZE:%.+]], i32 0, i32 0
+// CHECK-DAG: [[DTYPE:%.+]] = and i64 [[TYPE]], -4
+// CHECK-DAG: store i64 [[DTYPE]], i64* [[DTYPEADDR:%[^,]+]]
+// CHECK-DAG: [[DTYPEADDR]] = getelementptr inbounds [1 x i64], [1 x i64]* [[DTYPE:%.+]], i32 0, i32 0
+// CHECK: [[DRES:%.+]] = call i32 @__tgt_target_data_mapper_nowait(i64 [[DID]], i32 1, i8** [[BPTRADDR]], i8** [[VPTRADDR]], i[[sz]]* [[DSIZEADDR]], i64* [[DTYPEADDR]], i8** null)
+// CHECK: [[ISDELERR:%.+]] = icmp ne i32 [[DRES]], 0
+// CHECK: br i1 [[ISDELERR]], label %[[DELERR:[^,]+]], label %[[DONE]]
+// CHECK: [[DELERR]]
+// CHECK: store i32 [[DRES]], i32* %retval
+// CHECK: br label %[[DONE]]
+// CHECK: [[DONE]]
+// CHECK: [[RET:%.+]] = load i32, i32* %retval
+// CHECK: ret i32 [[RET]]
+
 
 // CHECK-LABEL: define {{.*}}void @{{.*}}foo{{.*}}
 void foo(int a){
