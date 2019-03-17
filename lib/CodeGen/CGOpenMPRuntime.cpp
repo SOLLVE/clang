@@ -8227,7 +8227,7 @@ emitOffloadingArrays(CodeGenFunction &CGF,
             Info.MapTypesArray, /*Idx0=*/0, /*Idx1=*/I);
         llvm::Value *OriMapType = CGF.Builder.getInt64(MapTypes[I]);
         llvm::Value *LeftToFrom = CGF.Builder.CreateAnd(
-            OriMapType,
+            MapperMapType,
             CGF.Builder.getInt64(MappableExprsHandler::OMP_MAP_TO |
                                  MappableExprsHandler::OMP_MAP_FROM));
         llvm::BasicBlock *AllocBB = CGF.createBasicBlock("omp.type.alloc");
@@ -8242,7 +8242,7 @@ emitOffloadingArrays(CodeGenFunction &CGF,
         // In case of alloc, clear OMP_MAP_TO and OMP_MAP_FROM.
         CGF.EmitBlock(AllocBB);
         llvm::Value *AllocMapType = CGF.Builder.CreateAnd(
-            MapperMapType,
+            OriMapType,
             CGF.Builder.getInt64(~(MappableExprsHandler::OMP_MAP_TO |
                                    MappableExprsHandler::OMP_MAP_FROM)));
         CGF.Builder.CreateBr(EndBB);
@@ -8253,7 +8253,7 @@ emitOffloadingArrays(CodeGenFunction &CGF,
         // In case of to, clear OMP_MAP_FROM.
         CGF.EmitBlock(ToBB);
         llvm::Value *ToMapType = CGF.Builder.CreateAnd(
-            MapperMapType,
+            OriMapType,
             CGF.Builder.getInt64(~MappableExprsHandler::OMP_MAP_FROM));
         CGF.Builder.CreateBr(EndBB);
         CGF.EmitBlock(ToElseBB);
@@ -8264,7 +8264,7 @@ emitOffloadingArrays(CodeGenFunction &CGF,
         // In case of from, clear OMP_MAP_TO.
         CGF.EmitBlock(FromBB);
         llvm::Value *FromMapType = CGF.Builder.CreateAnd(
-            MapperMapType,
+            OriMapType,
             CGF.Builder.getInt64(~MappableExprsHandler::OMP_MAP_TO));
         // In case of tofrom, do nothing.
         CGF.EmitBlock(EndBB);
@@ -8273,7 +8273,7 @@ emitOffloadingArrays(CodeGenFunction &CGF,
         MapType->addIncoming(AllocMapType, AllocBB);
         MapType->addIncoming(ToMapType, ToBB);
         MapType->addIncoming(FromMapType, FromBB);
-        MapType->addIncoming(MapperMapType, ToElseBB);
+        MapType->addIncoming(OriMapType, ToElseBB);
         Address Addr(GEP, Ctx.getTypeAlignInChars(Ctx.getIntTypeForBitwidth(
                               /*DestWidth*/ 64, /*Signed*/ true)));
         CGF.Builder.CreateStore(MapType, Addr);
