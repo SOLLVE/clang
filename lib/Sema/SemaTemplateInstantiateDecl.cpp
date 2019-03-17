@@ -2876,6 +2876,32 @@ Decl *TemplateDeclInstantiator::VisitOMPThreadPrivateDecl(
   return TD;
 }
 
+Decl *TemplateDeclInstantiator::VisitOMPAllocateDecl(OMPAllocateDecl *D) {
+  SmallVector<Expr *, 5> Vars;
+  for (auto *I : D->varlists()) {
+    Expr *Var = SemaRef.SubstExpr(I, TemplateArgs).get();
+    assert(isa<DeclRefExpr>(Var) && "allocate arg is not a DeclRefExpr");
+    Vars.push_back(Var);
+  }
+  SmallVector<OMPClause *, 4> Clauses;
+  // Copy map clauses from the original mapper.
+  for (OMPClause *C : D->clauselists()) {
+    auto *AC = cast<OMPAllocatorClause>(C);
+    ExprResult NewE = SemaRef.SubstExpr(AC->getAllocator(), TemplateArgs);
+    if (!NewE.isUsable())
+      continue;
+    OMPClause *IC = SemaRef.ActOnOpenMPAllocatorClause(
+        NewE.get(), AC->getBeginLoc(), AC->getLParenLoc(), AC->getEndLoc());
+    Clauses.push_back(IC);
+  }
+
+  Sema::DeclGroupPtrTy Res = SemaRef.ActOnOpenMPAllocateDirective(
+      D->getLocation(), Vars, Clauses, Owner);
+  if (Res.get().isNull())
+    return nullptr;
+  return Res.get().getSingleDecl();
+}
+
 Decl *TemplateDeclInstantiator::VisitOMPRequiresDecl(OMPRequiresDecl *D) {
   llvm_unreachable(
       "Requires directive cannot be instantiated within a dependent context");

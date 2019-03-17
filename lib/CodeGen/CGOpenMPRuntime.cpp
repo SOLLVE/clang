@@ -3800,14 +3800,29 @@ void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
            "Entry not initialized!");
     assert((!Entry.getAddress() || Entry.getAddress() == Addr) &&
            "Resetting with the new address.");
-    if (Entry.getAddress() && hasDeviceGlobalVarEntryInfo(VarName))
+    if (Entry.getAddress() && hasDeviceGlobalVarEntryInfo(VarName)) {
+      if (Entry.getVarSize().isZero()) {
+        Entry.setVarSize(VarSize);
+        Entry.setLinkage(Linkage);
+      }
       return;
-    Entry.setAddress(Addr);
+    }
     Entry.setVarSize(VarSize);
     Entry.setLinkage(Linkage);
+    Entry.setAddress(Addr);
   } else {
-    if (hasDeviceGlobalVarEntryInfo(VarName))
+    if (hasDeviceGlobalVarEntryInfo(VarName)) {
+      auto &Entry = OffloadEntriesDeviceGlobalVar[VarName];
+      assert(Entry.isValid() && Entry.getFlags() == Flags &&
+             "Entry not initialized!");
+      assert((!Entry.getAddress() || Entry.getAddress() == Addr) &&
+             "Resetting with the new address.");
+      if (Entry.getVarSize().isZero()) {
+        Entry.setVarSize(VarSize);
+        Entry.setLinkage(Linkage);
+      }
       return;
+    }
     OffloadEntriesDeviceGlobalVar.try_emplace(
         VarName, OffloadingEntriesNum, Addr, VarSize, Flags, Linkage);
     ++OffloadingEntriesNum;
@@ -4730,7 +4745,7 @@ static void emitPrivatesInit(CodeGenFunction &CGF,
         // Check if the variable is the target-based BasePointersArray,
         // PointersArray or SizesArray.
         LValue SharedRefLValue;
-        QualType Type = OriginalVD->getType();
+        QualType Type = PrivateLValue.getType();
         const FieldDecl *SharedField = CapturesInfo.lookup(OriginalVD);
         if (IsTargetTask && !SharedField) {
           assert(isa<ImplicitParamDecl>(OriginalVD) &&
@@ -8421,6 +8436,7 @@ getNestedDistributeDirective(ASTContext &Ctx, const OMPExecutableDirective &D) {
     case OMPD_cancellation_point:
     case OMPD_ordered:
     case OMPD_threadprivate:
+    case OMPD_allocate:
     case OMPD_task:
     case OMPD_simd:
     case OMPD_sections:
@@ -9160,6 +9176,7 @@ void CGOpenMPRuntime::scanForTargetRegionsFunctions(const Stmt *S,
     case OMPD_cancellation_point:
     case OMPD_ordered:
     case OMPD_threadprivate:
+    case OMPD_allocate:
     case OMPD_task:
     case OMPD_simd:
     case OMPD_sections:
@@ -9678,6 +9695,7 @@ void CGOpenMPRuntime::emitTargetDataStandAloneCall(
     case OMPD_cancellation_point:
     case OMPD_ordered:
     case OMPD_threadprivate:
+    case OMPD_allocate:
     case OMPD_task:
     case OMPD_simd:
     case OMPD_sections:
