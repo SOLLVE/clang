@@ -1,10 +1,10 @@
-// RUN: %clang_analyze_cc1 -analyzer-checker=core,alpha.cplusplus.UninitializedObject \
-// RUN:   -analyzer-config alpha.cplusplus.UninitializedObject:Pedantic=true -DPEDANTIC \
-// RUN:   -analyzer-config alpha.cplusplus.UninitializedObject:CheckPointeeInitialization=true \
+// RUN: %clang_analyze_cc1 -analyzer-checker=core,optin.cplusplus.UninitializedObject \
+// RUN:   -analyzer-config optin.cplusplus.UninitializedObject:Pedantic=true -DPEDANTIC \
+// RUN:   -analyzer-config optin.cplusplus.UninitializedObject:CheckPointeeInitialization=true \
 // RUN:   -std=c++14 -verify  %s
 
-// RUN: %clang_analyze_cc1 -analyzer-checker=core,alpha.cplusplus.UninitializedObject \
-// RUN:   -analyzer-config alpha.cplusplus.UninitializedObject:CheckPointeeInitialization=true \
+// RUN: %clang_analyze_cc1 -analyzer-checker=core,optin.cplusplus.UninitializedObject \
+// RUN:   -analyzer-config optin.cplusplus.UninitializedObject:CheckPointeeInitialization=true \
 // RUN:   -std=c++14 -verify  %s
 
 //===----------------------------------------------------------------------===//
@@ -358,7 +358,7 @@ template <class T>
 void wontInitialize(const T &);
 
 class PassingToUnknownFunctionTest1 {
-  int a, b; // expected-note{{uninitialized field 'this->b'}}
+  int a, b;
 
 public:
   PassingToUnknownFunctionTest1() {
@@ -368,7 +368,8 @@ public:
   }
 
   PassingToUnknownFunctionTest1(int) {
-    mayInitialize(a); // expected-warning{{1 uninitialized field at the end of the constructor call}}
+    mayInitialize(a);
+    // All good!
   }
 
   PassingToUnknownFunctionTest1(int, int) {

@@ -172,10 +172,16 @@ class CompoundStatementIndenter {
 public:
   CompoundStatementIndenter(UnwrappedLineParser *Parser,
                             const FormatStyle &Style, unsigned &LineLevel)
+      : CompoundStatementIndenter(Parser, LineLevel,
+                                  Style.BraceWrapping.AfterControlStatement,
+                                  Style.BraceWrapping.IndentBraces) {
+  }
+  CompoundStatementIndenter(UnwrappedLineParser *Parser, unsigned &LineLevel,
+                            bool WrapBrace, bool IndentBrace)
       : LineLevel(LineLevel), OldLineLevel(LineLevel) {
-    if (Style.BraceWrapping.AfterControlStatement)
+    if (WrapBrace)
       Parser->addUnwrappedLine();
-    if (Style.BraceWrapping.IndentBraces)
+    if (IndentBrace)
       ++LineLevel;
   }
   ~CompoundStatementIndenter() { LineLevel = OldLineLevel; }
@@ -655,6 +661,7 @@ void UnwrappedLineParser::parseChildBlock() {
 void UnwrappedLineParser::parsePPDirective() {
   assert(FormatTok->Tok.is(tok::hash) && "'#' expected");
   ScopedMacroState MacroState(*Line, Tokens, FormatTok);
+
   nextToken();
 
   if (!FormatTok->Tok.getIdentifierInfo()) {
@@ -798,7 +805,7 @@ void UnwrappedLineParser::parsePPEndIf() {
 void UnwrappedLineParser::parsePPDefine() {
   nextToken();
 
-  if (FormatTok->Tok.getKind() != tok::identifier) {
+  if (!FormatTok->Tok.getIdentifierInfo()) {
     IncludeGuard = IG_Rejected;
     IncludeGuardToken = nullptr;
     parsePPUnknown();
@@ -823,7 +830,7 @@ void UnwrappedLineParser::parsePPDefine() {
           FormatTok->WhitespaceRange.getEnd()) {
     parseParens();
   }
-  if (Style.IndentPPDirectives == FormatStyle::PPDIS_AfterHash)
+  if (Style.IndentPPDirectives != FormatStyle::PPDIS_None)
     Line->Level += PPBranchLevel + 1;
   addUnwrappedLine();
   ++Line->Level;
@@ -840,7 +847,7 @@ void UnwrappedLineParser::parsePPUnknown() {
   do {
     nextToken();
   } while (!eof());
-  if (Style.IndentPPDirectives == FormatStyle::PPDIS_AfterHash)
+  if (Style.IndentPPDirectives != FormatStyle::PPDIS_None)
     Line->Level += PPBranchLevel + 1;
   addUnwrappedLine();
 }
@@ -999,7 +1006,7 @@ void UnwrappedLineParser::parseStructuralElement() {
   case tok::kw_protected:
   case tok::kw_private:
     if (Style.Language == FormatStyle::LK_Java ||
-        Style.Language == FormatStyle::LK_JavaScript)
+        Style.Language == FormatStyle::LK_JavaScript || Style.isCSharp())
       nextToken();
     else
       parseAccessSpecifier();
@@ -1213,9 +1220,9 @@ void UnwrappedLineParser::parseStructuralElement() {
       // parseRecord falls through and does not yet add an unwrapped line as a
       // record declaration or definition can start a structural element.
       parseRecord();
-      // This does not apply for Java and JavaScript.
+      // This does not apply for Java, JavaScript and C#.
       if (Style.Language == FormatStyle::LK_Java ||
-          Style.Language == FormatStyle::LK_JavaScript) {
+          Style.Language == FormatStyle::LK_JavaScript || Style.isCSharp()) {
         if (FormatTok->is(tok::semi))
           nextToken();
         addUnwrappedLine();
@@ -1474,6 +1481,7 @@ bool UnwrappedLineParser::tryToParseLambda() {
       return true;
     }
   }
+  FormatTok->Type = TT_LambdaLBrace;
   LSquare.Type = TT_LambdaLSquare;
   parseChildBlock();
   return true;
@@ -1948,7 +1956,9 @@ void UnwrappedLineParser::parseLabel() {
   if (Line->Level > 1 || (!Line->InPPDirective && Line->Level > 0))
     --Line->Level;
   if (CommentsBeforeNextToken.empty() && FormatTok->Tok.is(tok::l_brace)) {
-    CompoundStatementIndenter Indenter(this, Style, Line->Level);
+    CompoundStatementIndenter Indenter(this, Line->Level,
+                                       Style.BraceWrapping.AfterCaseLabel,
+                                       Style.BraceWrapping.IndentBraces);
     parseBlock(/*MustBeDeclaration=*/false);
     if (FormatTok->Tok.is(tok::kw_break)) {
       if (Style.BraceWrapping.AfterControlStatement)
@@ -2015,6 +2025,10 @@ bool UnwrappedLineParser::parseEnum() {
   // error and thus assume it is just an identifier.
   if (Style.Language == FormatStyle::LK_JavaScript &&
       FormatTok->isOneOf(tok::colon, tok::question))
+    return false;
+
+  // In protobuf, "enum" can be used as a field name.
+  if (Style.Language == FormatStyle::LK_Proto && FormatTok->is(tok::equal))
     return false;
 
   // Eat up enum class ...
@@ -2671,6 +2685,9 @@ void UnwrappedLineParser::readToken(int LevelDifference) {
       // Comments stored before the preprocessor directive need to be output
       // before the preprocessor directive, at the same level as the
       // preprocessor directive, as we consider them to apply to the directive.
+      if (Style.IndentPPDirectives == FormatStyle::PPDIS_BeforeHash &&
+          PPBranchLevel > 0)
+        Line->Level += PPBranchLevel;
       flushComments(isOnNewLine(*FormatTok));
       parsePPDirective();
     }

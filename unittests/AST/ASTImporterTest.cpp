@@ -44,7 +44,7 @@ createVirtualFileIfNeeded(ASTUnit *ToAST, StringRef FileName,
   assert(ToAST);
   ASTContext &ToCtx = ToAST->getASTContext();
   auto *OFS = static_cast<llvm::vfs::OverlayFileSystem *>(
-      ToCtx.getSourceManager().getFileManager().getVirtualFileSystem().get());
+      &ToCtx.getSourceManager().getFileManager().getVirtualFileSystem());
   auto *MFS = static_cast<llvm::vfs::InMemoryFileSystem *>(
       OFS->overlays_begin()->get());
   MFS->addFile(FileName, 0, std::move(Buffer));
@@ -89,8 +89,8 @@ class TestImportBase : public CompilerOptionSpecificTest,
                        public ::testing::WithParamInterface<ArgVector> {
 
   template <typename NodeType>
-  NodeType importNode(ASTUnit *From, ASTUnit *To, ASTImporter &Importer,
-                      NodeType Node) {
+  llvm::Expected<NodeType> importNode(ASTUnit *From, ASTUnit *To,
+                                      ASTImporter &Importer, NodeType Node) {
     ASTContext &ToCtx = To->getASTContext();
 
     // Add 'From' file to virtual file system so importer can 'find' it
@@ -100,17 +100,19 @@ class TestImportBase : public CompilerOptionSpecificTest,
     createVirtualFileIfNeeded(To, FromFileName,
                               From->getBufferForFile(FromFileName));
 
-    auto Imported = Importer.Import(Node);
+    auto Imported = Importer.Import_New(Node);
 
-    // This should dump source locations and assert if some source locations
-    // were not imported.
-    SmallString<1024> ImportChecker;
-    llvm::raw_svector_ostream ToNothing(ImportChecker);
-    ToCtx.getTranslationUnitDecl()->print(ToNothing);
+    if (Imported) {
+      // This should dump source locations and assert if some source locations
+      // were not imported.
+      SmallString<1024> ImportChecker;
+      llvm::raw_svector_ostream ToNothing(ImportChecker);
+      ToCtx.getTranslationUnitDecl()->print(ToNothing);
 
-    // This traverses the AST to catch certain bugs like poorly or not
-    // implemented subtrees.
-    Imported->dump(ToNothing);
+      // This traverses the AST to catch certain bugs like poorly or not
+      // implemented subtrees.
+      (*Imported)->dump(ToNothing);
+    }
 
     return Imported;
   }
@@ -151,11 +153,16 @@ class TestImportBase : public CompilerOptionSpecificTest,
     EXPECT_TRUE(Verifier.match(ToImport, WrapperMatcher));
 
     auto Imported = importNode(FromAST.get(), ToAST.get(), Importer, ToImport);
-    if (!Imported)
-      return testing::AssertionFailure() << "Import failed, nullptr returned!";
+    if (!Imported) {
+      std::string ErrorText;
+      handleAllErrors(
+          Imported.takeError(),
+          [&ErrorText](const ImportError &Err) { ErrorText = Err.message(); });
+      return testing::AssertionFailure()
+             << "Import failed, error: \"" << ErrorText << "\"!";
+    }
 
-
-    return Verifier.match(Imported, WrapperMatcher);
+    return Verifier.match(*Imported, WrapperMatcher);
   }
 
   template <typename NodeType>
@@ -277,7 +284,9 @@ public:
       EXPECT_TRUE(FoundDecl.size() == 1);
       const Decl *ToImport = selectFirst<Decl>(DeclToImportID, FoundDecl);
       auto Imported = importNode(From, To, *ImporterRef, ToImport);
-      EXPECT_TRUE(Imported);
+      EXPECT_TRUE(static_cast<bool>(Imported));
+      if (!Imported)
+        llvm::consumeError(Imported.takeError());
     }
 
     // Find the declaration and import it.
@@ -339,13 +348,23 @@ class ASTImporterTestBase : public CompilerOptionSpecificTest {
     Decl *import(ASTImporterLookupTable &LookupTable, ASTUnit *ToAST,
                  Decl *FromDecl) {
       lazyInitImporter(LookupTable, ToAST);
-      return Importer->Import(FromDecl);
+      if (auto ImportedOrErr = Importer->Import_New(FromDecl))
+        return *ImportedOrErr;
+      else {
+        llvm::consumeError(ImportedOrErr.takeError());
+        return nullptr;
+      }
     }
 
     QualType import(ASTImporterLookupTable &LookupTable, ASTUnit *ToAST,
                     QualType FromType) {
       lazyInitImporter(LookupTable, ToAST);
-      return Importer->Import(FromType);
+      if (auto ImportedOrErr = Importer->Import_New(FromType))
+        return *ImportedOrErr;
+      else {
+        llvm::consumeError(ImportedOrErr.takeError());
+        return QualType{};
+      }
     }
   };
 
@@ -381,7 +400,7 @@ class ASTImporterTestBase : public CompilerOptionSpecificTest {
     // Create a virtual file in the To Ctx which corresponds to the file from
     // which we want to import the `From` Decl. Without this source locations
     // will be invalid in the ToCtx.
-    auto It = std::find_if(FromTUs.begin(), FromTUs.end(), [From](const TU &E) {
+    auto It = llvm::find_if(FromTUs, [From](const TU &E) {
       return E.TUDecl == From->getTranslationUnitDecl();
     });
     assert(It != FromTUs.end());
@@ -435,10 +454,9 @@ public:
   // name).
   TranslationUnitDecl *getTuDecl(StringRef SrcCode, Language Lang,
                                  StringRef FileName = "input.cc") {
-    assert(
-        std::find_if(FromTUs.begin(), FromTUs.end(), [FileName](const TU &E) {
-          return E.FileName == FileName;
-        }) == FromTUs.end());
+    assert(llvm::find_if(FromTUs, [FileName](const TU &E) {
+             return E.FileName == FileName;
+           }) == FromTUs.end());
 
     ArgVector Args = getArgVectorForLanguage(Lang);
     FromTUs.emplace_back(SrcCode, FileName, Args);
@@ -3575,12 +3593,10 @@ TEST_P(ASTImporterOptionSpecificTestBase,
   // The second specialization is different from the first, thus it violates
   // ODR, consequently we expect to keep the first specialization only, which is
   // already in the "To" context.
-  EXPECT_TRUE(ImportedSpec);
-  auto *ToSpec = FirstDeclMatcher<ClassTemplateSpecializationDecl>().match(
-      ToTU, classTemplateSpecializationDecl(hasName("X")));
-  EXPECT_EQ(ImportedSpec, ToSpec);
-  EXPECT_EQ(1u, DeclCounter<ClassTemplateSpecializationDecl>().match(
-                    ToTU, classTemplateSpecializationDecl()));
+  EXPECT_FALSE(ImportedSpec);
+  EXPECT_EQ(1u,
+            DeclCounter<ClassTemplateSpecializationDecl>().match(
+                ToTU, classTemplateSpecializationDecl(hasName("X"))));
 }
 
 TEST_P(ASTImporterOptionSpecificTestBase,
@@ -3955,6 +3971,23 @@ struct FunctionTemplateSpec {
   }
 };
 
+struct ClassTemplateSpec {
+  using DeclTy = ClassTemplateSpecializationDecl;
+  static constexpr auto *Prototype =
+    R"(
+    template <class T> class X;
+    template <> class X<int>;
+    )";
+  static constexpr auto *Definition =
+    R"(
+    template <class T> class X;
+    template <> class X<int> {};
+    )";
+  BindableMatcher<Decl> getPattern() {
+    return classTemplateSpecializationDecl(hasName("X"), unless(isImplicit()));
+  }
+};
+
 template <typename TypeParam>
 struct RedeclChain : ASTImporterOptionSpecificTestBase {
 
@@ -3962,6 +3995,45 @@ struct RedeclChain : ASTImporterOptionSpecificTestBase {
   std::string getPrototype() { return TypeParam::Prototype; }
   std::string getDefinition() { return TypeParam::Definition; }
   BindableMatcher<Decl> getPattern() const { return TypeParam().getPattern(); }
+
+  void CheckPreviousDecl(Decl *Prev, Decl *Current) {
+    ASSERT_NE(Prev, Current);
+    ASSERT_EQ(&Prev->getASTContext(), &Current->getASTContext());
+    EXPECT_EQ(Prev->getCanonicalDecl(), Current->getCanonicalDecl());
+
+    // Templates.
+    if (auto *PrevT = dyn_cast<TemplateDecl>(Prev)) {
+      EXPECT_EQ(Current->getPreviousDecl(), Prev);
+      auto *CurrentT = cast<TemplateDecl>(Current);
+      ASSERT_TRUE(PrevT->getTemplatedDecl());
+      ASSERT_TRUE(CurrentT->getTemplatedDecl());
+      EXPECT_EQ(CurrentT->getTemplatedDecl()->getPreviousDecl(),
+                PrevT->getTemplatedDecl());
+      return;
+    }
+
+    // Specializations.
+    if (auto *PrevF = dyn_cast<FunctionDecl>(Prev)) {
+      if (PrevF->getTemplatedKind() ==
+          FunctionDecl::TK_FunctionTemplateSpecialization) {
+        // There may be a hidden fwd spec decl before a spec decl.
+        // In that case the previous visible decl can be reached through that
+        // invisible one.
+        EXPECT_THAT(Prev, testing::AnyOf(
+                              Current->getPreviousDecl(),
+                              Current->getPreviousDecl()->getPreviousDecl()));
+        auto *ToTU = Prev->getTranslationUnitDecl();
+        auto *TemplateD = FirstDeclMatcher<FunctionTemplateDecl>().match(
+            ToTU, functionTemplateDecl());
+        auto *FirstSpecD = *(TemplateD->spec_begin());
+        EXPECT_EQ(FirstSpecD->getCanonicalDecl(), PrevF->getCanonicalDecl());
+        return;
+      }
+    }
+
+    // The rest: Classes, Functions, etc.
+    EXPECT_EQ(Current->getPreviousDecl(), Prev);
+  }
 
   void
   TypedTest_PrototypeShouldBeImportedAsAPrototypeWhenThereIsNoDefinition() {
@@ -4015,14 +4087,8 @@ struct RedeclChain : ASTImporterOptionSpecificTestBase {
     EXPECT_TRUE(Imported1 == To1);
     EXPECT_FALSE(To0->isThisDeclarationADefinition());
     EXPECT_FALSE(To1->isThisDeclarationADefinition());
-    EXPECT_EQ(To1->getPreviousDecl(), To0);
-    if (auto *ToT0 = dyn_cast<TemplateDecl>(To0)) {
-      auto *ToT1 = cast<TemplateDecl>(To1);
-      ASSERT_TRUE(ToT0->getTemplatedDecl());
-      ASSERT_TRUE(ToT1->getTemplatedDecl());
-      EXPECT_EQ(ToT1->getTemplatedDecl()->getPreviousDecl(),
-                ToT0->getTemplatedDecl());
-    }
+
+    CheckPreviousDecl(To0, To1);
   }
 
   void TypedTest_ImportDefinitionAfterImportedPrototype() {
@@ -4044,14 +4110,8 @@ struct RedeclChain : ASTImporterOptionSpecificTestBase {
     EXPECT_TRUE(ImportedDef == ToDef);
     EXPECT_FALSE(ToProto->isThisDeclarationADefinition());
     EXPECT_TRUE(ToDef->isThisDeclarationADefinition());
-    EXPECT_EQ(ToDef->getPreviousDecl(), ToProto);
-    if (auto *ToProtoT = dyn_cast<TemplateDecl>(ToProto)) {
-      auto *ToDefT = cast<TemplateDecl>(ToDef);
-      ASSERT_TRUE(ToProtoT->getTemplatedDecl());
-      ASSERT_TRUE(ToDefT->getTemplatedDecl());
-      EXPECT_EQ(ToDefT->getTemplatedDecl()->getPreviousDecl(),
-                ToProtoT->getTemplatedDecl());
-    }
+
+    CheckPreviousDecl(ToProto, ToDef);
   }
 
   void TypedTest_ImportPrototypeAfterImportedDefinition() {
@@ -4073,14 +4133,8 @@ struct RedeclChain : ASTImporterOptionSpecificTestBase {
     EXPECT_TRUE(ImportedProto == ToProto);
     EXPECT_TRUE(ToDef->isThisDeclarationADefinition());
     EXPECT_FALSE(ToProto->isThisDeclarationADefinition());
-    EXPECT_EQ(ToProto->getPreviousDecl(), ToDef);
-    if (auto *ToDefT = dyn_cast<TemplateDecl>(ToDef)) {
-      auto *ToProtoT = cast<TemplateDecl>(ToProto);
-      ASSERT_TRUE(ToDefT->getTemplatedDecl());
-      ASSERT_TRUE(ToProtoT->getTemplatedDecl());
-      EXPECT_EQ(ToProtoT->getTemplatedDecl()->getPreviousDecl(),
-                ToDefT->getTemplatedDecl());
-    }
+
+    CheckPreviousDecl(ToDef, ToProto);
   }
 
   void TypedTest_ImportPrototypes() {
@@ -4102,27 +4156,8 @@ struct RedeclChain : ASTImporterOptionSpecificTestBase {
     EXPECT_TRUE(Imported1 == To1);
     EXPECT_FALSE(To0->isThisDeclarationADefinition());
     EXPECT_FALSE(To1->isThisDeclarationADefinition());
-    EXPECT_EQ(To1->getPreviousDecl(), To0);
-    if (auto *ToT0 = dyn_cast<TemplateDecl>(To0)) {
-      auto *ToT1 = cast<TemplateDecl>(To1);
-      ASSERT_TRUE(ToT0->getTemplatedDecl());
-      ASSERT_TRUE(ToT1->getTemplatedDecl());
-      EXPECT_EQ(ToT1->getTemplatedDecl()->getPreviousDecl(),
-                ToT0->getTemplatedDecl());
-    }
-    // Extra check for specializations.
-    // FIXME Add this check to other tests too (possibly factor out into a
-    // function), when they start to pass.
-    if (auto *From0F = dyn_cast<FunctionDecl>(From0)) {
-      auto *To0F = cast<FunctionDecl>(To0);
-      if (From0F->getTemplatedKind() ==
-          FunctionDecl::TK_FunctionTemplateSpecialization) {
-        auto *TemplateD = FirstDeclMatcher<FunctionTemplateDecl>().match(
-            ToTU, functionTemplateDecl());
-        auto *FirstSpecD = *(TemplateD->spec_begin());
-        EXPECT_EQ(FirstSpecD->getCanonicalDecl(), To0F->getCanonicalDecl());
-      }
-    }
+
+    CheckPreviousDecl(To0, To1);
   }
 
   void TypedTest_ImportDefinitions() {
@@ -4167,14 +4202,8 @@ struct RedeclChain : ASTImporterOptionSpecificTestBase {
     EXPECT_TRUE(ImportedProto == ToProto);
     EXPECT_TRUE(ToDef->isThisDeclarationADefinition());
     EXPECT_FALSE(ToProto->isThisDeclarationADefinition());
-    EXPECT_EQ(ToProto->getPreviousDecl(), ToDef);
-    if (auto *ToDefT = dyn_cast<TemplateDecl>(ToDef)) {
-      auto *ToProtoT = cast<TemplateDecl>(ToProto);
-      ASSERT_TRUE(ToDefT->getTemplatedDecl());
-      ASSERT_TRUE(ToProtoT->getTemplatedDecl());
-      EXPECT_EQ(ToProtoT->getTemplatedDecl()->getPreviousDecl(),
-                ToDefT->getTemplatedDecl());
-    }
+
+    CheckPreviousDecl(ToDef, ToProto);
   }
 
   void TypedTest_ImportPrototypeThenDefinition() {
@@ -4198,14 +4227,8 @@ struct RedeclChain : ASTImporterOptionSpecificTestBase {
     EXPECT_TRUE(ImportedProto == ToProto);
     EXPECT_TRUE(ToDef->isThisDeclarationADefinition());
     EXPECT_FALSE(ToProto->isThisDeclarationADefinition());
-    EXPECT_EQ(ToDef->getPreviousDecl(), ToProto);
-    if (auto *ToDefT = dyn_cast<TemplateDecl>(ToDef)) {
-      auto *ToProtoT = cast<TemplateDecl>(ToProto);
-      ASSERT_TRUE(ToDefT->getTemplatedDecl());
-      ASSERT_TRUE(ToProtoT->getTemplatedDecl());
-      EXPECT_EQ(ToDefT->getTemplatedDecl()->getPreviousDecl(),
-                ToProtoT->getTemplatedDecl());
-    }
+
+    CheckPreviousDecl(ToProto, ToDef);
   }
 
   void TypedTest_WholeRedeclChainIsImportedAtOnce() {
@@ -4247,7 +4270,8 @@ struct RedeclChain : ASTImporterOptionSpecificTestBase {
     EXPECT_TRUE(DefinitionD->getPreviousDecl());
     EXPECT_FALSE(
         DefinitionD->getPreviousDecl()->isThisDeclarationADefinition());
-    EXPECT_EQ(DefinitionD->getPreviousDecl()->getPreviousDecl(), ProtoD);
+
+    CheckPreviousDecl(ProtoD, DefinitionD->getPreviousDecl());
   }
 };
 
@@ -4276,6 +4300,9 @@ ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(
     RedeclChain, FunctionTemplateSpec, ,
     PrototypeShouldBeImportedAsAPrototypeWhenThereIsNoDefinition)
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(
+    RedeclChain, ClassTemplateSpec, ,
+    PrototypeShouldBeImportedAsAPrototypeWhenThereIsNoDefinition)
 
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(
     RedeclChain, Function, , DefinitionShouldBeImportedAsADefinition)
@@ -4291,6 +4318,8 @@ ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(
     RedeclChain, FunctionTemplateSpec, ,
     DefinitionShouldBeImportedAsADefinition)
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(
+    RedeclChain, ClassTemplateSpec, , DefinitionShouldBeImportedAsADefinition)
 
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, Function, ,
                                         ImportPrototypeAfterImportedPrototype)
@@ -4304,6 +4333,8 @@ ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplate, ,
                                         ImportPrototypeAfterImportedPrototype)
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplateSpec, ,
                                         ImportPrototypeAfterImportedPrototype)
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplateSpec, ,
+                                        ImportPrototypeAfterImportedPrototype)
 
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, Function, ,
                                         ImportDefinitionAfterImportedPrototype)
@@ -4317,6 +4348,8 @@ ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplate, ,
                                         ImportDefinitionAfterImportedPrototype)
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplateSpec, ,
                                         ImportDefinitionAfterImportedPrototype)
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplateSpec, ,
+                                        ImportDefinitionAfterImportedPrototype)
 
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, Function, ,
                                         ImportPrototypeAfterImportedDefinition)
@@ -4329,6 +4362,8 @@ ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplate, ,
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplate, ,
                                         ImportPrototypeAfterImportedDefinition)
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplateSpec, ,
+                                        ImportPrototypeAfterImportedDefinition)
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplateSpec, ,
                                         ImportPrototypeAfterImportedDefinition)
 
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, Function, ,
@@ -4340,9 +4375,10 @@ ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplate, ,
                                         ImportPrototypes)
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplate, ,
                                         ImportPrototypes)
-// FIXME This does not pass, possible error with Spec import.
-ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplateSpec,
-                                        DISABLED_, ImportPrototypes)
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplateSpec, ,
+                                        ImportPrototypes)
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplateSpec, ,
+                                        ImportPrototypes)
 
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, Function, ,
                                         ImportDefinitions)
@@ -4354,9 +4390,10 @@ ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplate, ,
                                         ImportDefinitions)
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplate, ,
                                         ImportDefinitions)
-// FIXME This does not pass, possible error with Spec import.
-ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplateSpec,
-                                        DISABLED_, ImportDefinitions)
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplateSpec, ,
+                                        ImportDefinitions)
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplateSpec, ,
+                                        ImportDefinitions)
 
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, Function, ,
                                         ImportDefinitionThenPrototype)
@@ -4368,9 +4405,9 @@ ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplate, ,
                                         ImportDefinitionThenPrototype)
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplate, ,
                                         ImportDefinitionThenPrototype)
-// FIXME This does not pass, possible error with Spec import.
-ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplateSpec,
-                                        DISABLED_,
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplateSpec, ,
+                                        ImportDefinitionThenPrototype)
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplateSpec, ,
                                         ImportDefinitionThenPrototype)
 
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, Function, ,
@@ -4383,9 +4420,9 @@ ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplate, ,
                                         ImportPrototypeThenDefinition)
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplate, ,
                                         ImportPrototypeThenDefinition)
-// FIXME This does not pass, possible error with Spec import.
-ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplateSpec,
-                                        DISABLED_,
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplateSpec, ,
+                                        ImportPrototypeThenDefinition)
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, ClassTemplateSpec, ,
                                         ImportPrototypeThenDefinition)
 
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, Function, ,
@@ -4403,9 +4440,7 @@ ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, Variable, ,
                                         ImportPrototypeThenProtoAndDefinition)
 ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplate, ,
                                         ImportPrototypeThenProtoAndDefinition)
-// FIXME This does not pass, possible error with Spec import.
-ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplateSpec,
-                                        DISABLED_,
+ASTIMPORTER_INSTANTIATE_TYPED_TEST_CASE(RedeclChain, FunctionTemplateSpec, ,
                                         ImportPrototypeThenProtoAndDefinition)
 
 INSTANTIATE_TEST_CASE_P(ParameterizedTests, RedeclChainFunction,
@@ -4419,6 +4454,8 @@ INSTANTIATE_TEST_CASE_P(ParameterizedTests, RedeclChainFunctionTemplate,
 INSTANTIATE_TEST_CASE_P(ParameterizedTests, RedeclChainClassTemplate,
                         DefaultTestValuesForRunOptions, );
 INSTANTIATE_TEST_CASE_P(ParameterizedTests, RedeclChainFunctionTemplateSpec,
+                        DefaultTestValuesForRunOptions, );
+INSTANTIATE_TEST_CASE_P(ParameterizedTests, RedeclChainClassTemplateSpec,
                         DefaultTestValuesForRunOptions, );
 
 

@@ -215,7 +215,7 @@ class TypeSourceInfo;
     /// \returns The equivalent declaration in the "to" context, or the import
     /// error.
     llvm::Expected<Decl *> Import_New(Decl *FromD);
-    llvm::Expected<Decl *> Import_New(const Decl *FromD) {
+    llvm::Expected<const Decl *> Import_New(const Decl *FromD) {
       return Import_New(const_cast<Decl *>(FromD));
     }
     // FIXME: Remove this version.
@@ -425,7 +425,7 @@ class TypeSourceInfo;
 
     /// Subclasses can override this function to observe all of the \c From ->
     /// \c To declaration mappings as they are imported.
-    virtual Decl *Imported(Decl *From, Decl *To) { return To; }
+    virtual void Imported(Decl *From, Decl *To) {}
 
     /// Store and assign the imported declaration to its counterpart.
     Decl *MapImported(Decl *From, Decl *To);

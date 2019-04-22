@@ -42,6 +42,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/TimeProfiler.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
@@ -914,9 +915,10 @@ static PassBuilder::OptimizationLevel mapToLevel(const CodeGenOptions &Opts) {
   }
 }
 
-void addSanitizersAtO0(ModulePassManager &MPM, const Triple &TargetTriple,
-                       const LangOptions &LangOpts,
-                       const CodeGenOptions &CodeGenOpts) {
+static void addSanitizersAtO0(ModulePassManager &MPM,
+                              const Triple &TargetTriple,
+                              const LangOptions &LangOpts,
+                              const CodeGenOptions &CodeGenOpts) {
   if (LangOpts.Sanitize.has(SanitizerKind::Address)) {
     MPM.addPass(RequireAnalysisPass<ASanGlobalsMetadataAnalysis, Module>());
     bool Recover = CodeGenOpts.SanitizeRecover.has(SanitizerKind::Address);
@@ -1009,7 +1011,7 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
                           CodeGenOpts.DebugInfoForProfiling);
   }
 
-  PassBuilder PB(TM.get(), PGOOpt);
+  PassBuilder PB(TM.get(), PipelineTuningOptions(), PGOOpt);
 
   // Attempt to load pass plugins and register their callbacks with PB.
   for (auto &PluginFN : CodeGenOpts.PassPlugins) {
@@ -1381,6 +1383,9 @@ void clang::EmitBackendOutput(DiagnosticsEngine &Diags,
                               const llvm::DataLayout &TDesc, Module *M,
                               BackendAction Action,
                               std::unique_ptr<raw_pwrite_stream> OS) {
+
+  llvm::TimeTraceScope TimeScope("Backend", StringRef(""));
+
   std::unique_ptr<llvm::Module> EmptyModule;
   if (!CGOpts.ThinLTOIndexFile.empty()) {
     // If we are performing a ThinLTO importing compile, load the function index
