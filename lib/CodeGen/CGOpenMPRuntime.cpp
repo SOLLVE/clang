@@ -7106,13 +7106,11 @@ private:
         : IE(IE), VD(VD) {}
   };
 
-  /// The target directive from where the mappable clauses were extracted. One
-  /// and only one of CurDir and CurMapperDir is valid.
-  const OMPExecutableDirective *CurDir = nullptr;
-
-  /// The mapper directive from where the map clauses were extracted. One and
-  /// only one of CurDir and CurMapperDir is valid.
-  const OMPDeclareMapperDecl *CurMapperDir = nullptr;
+  /// The target directive from where the mappable clauses were extracted. It
+  /// could be either a executable directive or a user-defined mapper directive.
+  llvm::PointerUnion<const OMPExecutableDirective *,
+                     const OMPDeclareMapperDecl *>
+      CurDir;
 
   /// Function the directive is being generated for.
   CodeGenFunction &CGF;
@@ -7799,7 +7797,7 @@ public:
 
   /// Constructor for the declare mapper directive.
   MappableExprsHandler(const OMPDeclareMapperDecl &Dir, CodeGenFunction &CGF)
-      : CurMapperDir(&Dir), CGF(CGF) {}
+      : CurDir(&Dir), CGF(CGF) {}
 
   /// Generate code for the combined entry if we have a partially mapped struct
   /// and take care of the mapping flags of the arguments corresponding to
@@ -7863,17 +7861,20 @@ public:
     };
 
     // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
-    for (const auto *C : this->CurDir->getClausesOfKind<OMPMapClause>())
+    assert(this->CurDir.is<const OMPExecutableDirective *>() &&
+           "Expect a executable directive");
+    const auto *CurExecDir = this->CurDir.get<const OMPExecutableDirective *>();
+    for (const auto *C : CurExecDir->getClausesOfKind<OMPMapClause>())
       for (const auto &L : C->component_lists()) {
         InfoGen(L.first, L.second, C->getMapType(), C->getMapTypeModifiers(),
             /*ReturnDevicePointer=*/false, C->isImplicit());
       }
-    for (const auto *C : this->CurDir->getClausesOfKind<OMPToClause>())
+    for (const auto *C : CurExecDir->getClausesOfKind<OMPToClause>())
       for (const auto &L : C->component_lists()) {
         InfoGen(L.first, L.second, OMPC_MAP_to, llvm::None,
             /*ReturnDevicePointer=*/false, C->isImplicit());
       }
-    for (const auto *C : this->CurDir->getClausesOfKind<OMPFromClause>())
+    for (const auto *C : CurExecDir->getClausesOfKind<OMPFromClause>())
       for (const auto &L : C->component_lists()) {
         InfoGen(L.first, L.second, OMPC_MAP_from, llvm::None,
             /*ReturnDevicePointer=*/false, C->isImplicit());
@@ -7888,9 +7889,8 @@ public:
     llvm::MapVector<const ValueDecl *, SmallVector<DeferredDevicePtrEntryTy, 4>>
         DeferredInfo;
 
-    // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
     for (const auto *C :
-        this->CurDir->getClausesOfKind<OMPUseDevicePtrClause>()) {
+         CurExecDir->getClausesOfKind<OMPUseDevicePtrClause>()) {
       for (const auto &L : C->component_lists()) {
         assert(!L.second.empty() && "Not expecting empty list of components!");
         const ValueDecl *VD = L.second.back().getAssociatedDeclaration();
@@ -8022,9 +8022,10 @@ public:
                                 MapValuesArrayTy &Pointers,
                                 MapValuesArrayTy &Sizes,
                                 MapFlagsArrayTy &Types) const {
-    // FIXME: MSVC 2013 seems to require this-> to find members.
-    assert(this->CurMapperDir && !this->CurDir &&
-           "Expect a valid declare mapper directive.");
+    // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
+    assert(this->CurDir.is<const OMPDeclareMapperDecl *>() &&
+           "Expect a declare mapper directive");
+    const auto *CurMapperDir = this->CurDir.get<const OMPDeclareMapperDecl *>();
     // We have to process the component lists that relate with the same
     // declaration in a single chunk so that we can generate the map flags
     // correctly. Therefore, we organize all lists in a map.
@@ -8044,8 +8045,7 @@ public:
                             IsImplicit);
     };
 
-    // FIXME: MSVC 2013 seems to require this-> to find member CurMapperDir.
-    for (const auto *C : this->CurMapperDir->clauselists()) {
+    for (const auto *C : CurMapperDir->clauselists()) {
       const auto *MC = cast<OMPMapClause>(C);
       for (const auto &L : MC->component_lists()) {
         InfoGen(L.first, L.second, MC->getMapType(), MC->getMapTypeModifiers(),
@@ -8198,7 +8198,10 @@ public:
                    OpenMPMapClauseKind, ArrayRef<OpenMPMapModifierKind>, bool>;
     SmallVector<MapData, 4> DeclComponentLists;
     // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
-    for (const auto *C : this->CurDir->getClausesOfKind<OMPMapClause>()) {
+    assert(this->CurDir.is<const OMPExecutableDirective *>() &&
+           "Expect a executable directive");
+    const auto *CurExecDir = this->CurDir.get<const OMPExecutableDirective *>();
+    for (const auto *C : CurExecDir->getClausesOfKind<OMPMapClause>()) {
       for (const auto &L : C->decl_component_lists(VD)) {
         assert(L.first == VD &&
                "We got information for the wrong declaration??");
@@ -8346,9 +8349,13 @@ public:
                                         MapValuesArrayTy &Pointers,
                                         MapValuesArrayTy &Sizes,
                                         MapFlagsArrayTy &Types) const {
+    // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
+    assert(this->CurDir.is<const OMPExecutableDirective *>() &&
+           "Expect a executable directive");
+    const auto *CurExecDir = this->CurDir.get<const OMPExecutableDirective *>();
     // Map other list items in the map clause which are not captured variables
     // but "declare target link" global variables.,
-    for (const auto *C : this->CurDir->getClausesOfKind<OMPMapClause>()) {
+    for (const auto *C : CurExecDir->getClausesOfKind<OMPMapClause>()) {
       for (const auto &L : C->component_lists()) {
         if (!L.first)
           continue;
