@@ -7107,7 +7107,7 @@ private:
   };
 
   /// The target directive from where the mappable clauses were extracted. It
-  /// could be either a executable directive or a user-defined mapper directive.
+  /// is either a executable directive or a user-defined mapper directive.
   llvm::PointerUnion<const OMPExecutableDirective *,
                      const OMPDeclareMapperDecl *>
       CurDir;
