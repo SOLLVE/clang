@@ -797,12 +797,12 @@ public:
   virtual void emitUserDefinedMapper(const OMPDeclareMapperDecl *D);
 
   /// Emit a function for a user defined mapper. Whether it is synchronous or
-  /// asynchronous depends on \a NoWait.
+  /// asynchronous depends on \p NoWait.
   virtual llvm::Function *emitUDMapperFunc(const OMPDeclareMapperDecl *D,
                                            bool NoWait);
 
-  // Emit the array initialization or deletion portion for user-defined mapper
-  // code generation.
+  /// Emit the array initialization or deletion portion for user-defined mapper
+  /// code generation.
   virtual llvm::Value *
   emitUDMapperArrayInitOrDel(CodeGenFunction &MapperCGF, llvm::Value *DeviceID,
                              llvm::Value *BasePtr, llvm::Value *Ptr,

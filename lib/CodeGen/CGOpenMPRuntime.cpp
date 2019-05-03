@@ -8017,7 +8017,7 @@ public:
   }
 
   /// Generate all the base pointers, section pointers, sizes and map types for
-  /// the extracted map clauses.
+  /// the extracted map clauses of user-defined mapper.
   void generateAllInfoForMapper(MapBaseValuesArrayTy &BasePointers,
                                 MapValuesArrayTy &Pointers,
                                 MapValuesArrayTy &Sizes,
@@ -8798,8 +8798,8 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
 }
 
 /// Emit the user-defined mapper function. Whether it is synchronous or
-/// asynchronous depends on \a NoWait. The code generation follows the pattern
-/// in the example below.
+/// asynchronous depends on \p NoWait. The code generation follows the
+/// pattern in the example below.
 /// \code
 /// int .omp_mapper_<mapper_id>.(int64_t device_id, Ty *base_ptr, Ty *ptr,
 ///                              size_t size, int64_t maptype) {
