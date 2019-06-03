@@ -36,6 +36,7 @@
 #include "clang/Basic/CharInfo.h"
 #include "clang/Basic/ExpressionTraits.h"
 #include "clang/Basic/IdentifierTable.h"
+#include "clang/Basic/JsonSupport.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/Lambda.h"
 #include "clang/Basic/OpenMPKinds.h"
@@ -904,6 +905,10 @@ void StmtPrinter::VisitOMPTargetTeamsDistributeSimdDirective(
 //===----------------------------------------------------------------------===//
 //  Expr printing methods.
 //===----------------------------------------------------------------------===//
+
+void StmtPrinter::VisitSourceLocExpr(SourceLocExpr *Node) {
+  OS << Node->getBuiltinStr() << "()";
+}
 
 void StmtPrinter::VisitConstantExpr(ConstantExpr *Node) {
   PrintExpr(Node->getSubExpr());
@@ -1895,13 +1900,22 @@ void StmtPrinter::VisitLambdaExpr(LambdaExpr *Node) {
       llvm_unreachable("VLA type in explicit captures.");
     }
 
+    if (C->isPackExpansion())
+      OS << "...";
+
     if (Node->isInitCapture(C))
       PrintExpr(C->getCapturedVar()->getInit());
   }
   OS << ']';
 
+  if (!Node->getExplicitTemplateParameters().empty()) {
+    Node->getTemplateParameterList()->print(
+        OS, Node->getLambdaClass()->getASTContext(),
+        /*OmitTemplateKW*/true);
+  }
+
   if (Node->hasExplicitParameters()) {
-    OS << " (";
+    OS << '(';
     CXXMethodDecl *Method = Node->getCallOperator();
     NeedComma = false;
     for (const auto *P : Method->parameters()) {
@@ -1936,9 +1950,11 @@ void StmtPrinter::VisitLambdaExpr(LambdaExpr *Node) {
   }
 
   // Print the body.
-  CompoundStmt *Body = Node->getBody();
   OS << ' ';
-  PrintStmt(Body);
+  if (Policy.TerseOutput)
+    OS << "{}";
+  else
+    PrintRawCompoundStmt(Node->getBody());
 }
 
 void StmtPrinter::VisitCXXScalarValueInitExpr(CXXScalarValueInitExpr *Node) {
@@ -1968,10 +1984,11 @@ void StmtPrinter::VisitCXXNewExpr(CXXNewExpr *E) {
   if (E->isParenTypeId())
     OS << "(";
   std::string TypeS;
-  if (Expr *Size = E->getArraySize()) {
+  if (Optional<Expr *> Size = E->getArraySize()) {
     llvm::raw_string_ostream s(TypeS);
     s << '[';
-    Size->printPretty(s, Helper, Policy);
+    if (*Size)
+      (*Size)->printPretty(s, Helper, Policy);
     s << ']';
   }
   E->getAllocatedType().print(OS, Policy, TypeS);
@@ -2379,12 +2396,21 @@ void Stmt::dumpPretty(const ASTContext &Context) const {
   printPretty(llvm::errs(), nullptr, PrintingPolicy(Context.getLangOpts()));
 }
 
-void Stmt::printPretty(raw_ostream &OS, PrinterHelper *Helper,
+void Stmt::printPretty(raw_ostream &Out, PrinterHelper *Helper,
                        const PrintingPolicy &Policy, unsigned Indentation,
-                       StringRef NL,
-                       const ASTContext *Context) const {
-  StmtPrinter P(OS, Helper, Policy, Indentation, NL, Context);
-  P.Visit(const_cast<Stmt*>(this));
+                       StringRef NL, const ASTContext *Context) const {
+  StmtPrinter P(Out, Helper, Policy, Indentation, NL, Context);
+  P.Visit(const_cast<Stmt *>(this));
+}
+
+void Stmt::printJson(raw_ostream &Out, PrinterHelper *Helper,
+                     const PrintingPolicy &Policy, bool AddQuotes) const {
+  std::string Buf;
+  llvm::raw_string_ostream TempOut(Buf);
+
+  printPretty(TempOut, Helper, Policy);
+
+  Out << JsonFormat(TempOut.str(), AddQuotes);
 }
 
 //===----------------------------------------------------------------------===//

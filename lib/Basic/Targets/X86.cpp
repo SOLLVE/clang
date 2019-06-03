@@ -451,7 +451,9 @@ void X86TargetInfo::setSSELevel(llvm::StringMap<bool> &Features,
   if (Enabled) {
     switch (Level) {
     case AVX512F:
-      Features["avx512f"] = Features["fma"] = Features["f16c"] = true;
+      Features["avx512f"] = true;
+      Features["fma"] = true;
+      Features["f16c"] = true;
       LLVM_FALLTHROUGH;
     case AVX2:
       Features["avx2"] = true;
@@ -490,8 +492,8 @@ void X86TargetInfo::setSSELevel(llvm::StringMap<bool> &Features,
     Features["sse"] = false;
     LLVM_FALLTHROUGH;
   case SSE2:
-    Features["sse2"] = Features["pclmul"] = Features["aes"] = Features["sha"] =
-        Features["gfni"] = false;
+    Features["sse2"] = Features["pclmul"] = Features["aes"] = false;
+    Features["sha"] = Features["gfni"] = false;
     LLVM_FALLTHROUGH;
   case SSE3:
     Features["sse3"] = false;
@@ -507,20 +509,22 @@ void X86TargetInfo::setSSELevel(llvm::StringMap<bool> &Features,
     Features["sse4.2"] = false;
     LLVM_FALLTHROUGH;
   case AVX:
-    Features["fma"] = Features["avx"] = Features["f16c"] = Features["xsave"] =
-        Features["xsaveopt"] = Features["vaes"] = Features["vpclmulqdq"] = false;
+    Features["fma"] = Features["avx"] = Features["f16c"] = false;
+    Features["xsave"] = Features["xsaveopt"] = Features["vaes"] = false;
+    Features["vpclmulqdq"] = false;
     setXOPLevel(Features, FMA4, false);
     LLVM_FALLTHROUGH;
   case AVX2:
     Features["avx2"] = false;
     LLVM_FALLTHROUGH;
   case AVX512F:
-    Features["avx512f"] = Features["avx512cd"] = Features["avx512er"] =
-        Features["avx512pf"] = Features["avx512dq"] = Features["avx512bw"] =
-            Features["avx512vl"] = Features["avx512vbmi"] =
-                Features["avx512ifma"] = Features["avx512vpopcntdq"] =
-                    Features["avx512bitalg"] = Features["avx512vnni"] =
-                        Features["avx512vbmi2"] = false;
+    Features["avx512f"] = Features["avx512cd"] = Features["avx512er"] = false;
+    Features["avx512pf"] = Features["avx512dq"] = Features["avx512bw"] = false;
+    Features["avx512vl"] = Features["avx512vbmi"] = false;
+    Features["avx512ifma"] = Features["avx512vpopcntdq"] = false;
+    Features["avx512bitalg"] = Features["avx512vnni"] = false;
+    Features["avx512vbmi2"] = Features["avx512bf16"] = false;
+    Features["avx512vp2intersect"] = false;
     break;
   }
 }
@@ -648,20 +652,20 @@ void X86TargetInfo::setFeatureEnabledImpl(llvm::StringMap<bool> &Features,
     setSSELevel(Features, AVX2, Enabled);
   } else if (Name == "avx512f") {
     setSSELevel(Features, AVX512F, Enabled);
-  } else if (Name == "avx512cd" || Name == "avx512er" || Name == "avx512pf" ||
-             Name == "avx512dq" || Name == "avx512bw" || Name == "avx512vl" ||
-             Name == "avx512vbmi" || Name == "avx512ifma" ||
-             Name == "avx512vpopcntdq" || Name == "avx512bitalg" ||
-             Name == "avx512vnni" || Name == "avx512vbmi2") {
+  } else if (Name.startswith("avx512")) {
     if (Enabled)
       setSSELevel(Features, AVX512F, Enabled);
-    // Enable BWI instruction if VBMI/VBMI2/BITALG is being enabled.
-    if ((Name.startswith("avx512vbmi") || Name == "avx512bitalg") && Enabled)
+    // Enable BWI instruction if certain features are being enabled.
+    if ((Name == "avx512vbmi" || Name == "avx512vbmi2" ||
+         Name == "avx512bitalg" || Name == "avx512bf16") && Enabled)
       Features["avx512bw"] = true;
-    // Also disable VBMI/VBMI2/BITALG if BWI is being disabled.
-    if (Name == "avx512bw" && !Enabled)
-      Features["avx512vbmi"] = Features["avx512vbmi2"] =
+    // Also disable some features if BWI is being disabled.
+    if (Name == "avx512bw" && !Enabled) {
+      Features["avx512vbmi"] = false;
+      Features["avx512vbmi2"] = false;
       Features["avx512bitalg"] = false;
+      Features["avx512bf16"] = false;
+    }
   } else if (Name == "fma") {
     if (Enabled)
       setSSELevel(Features, AVX, Enabled);
@@ -751,6 +755,8 @@ bool X86TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
       HasAVX512VPOPCNTDQ = true;
     } else if (Feature == "+avx512vnni") {
       HasAVX512VNNI = true;
+    } else if (Feature == "+avx512bf16") {
+      HasAVX512BF16 = true;
     } else if (Feature == "+avx512er") {
       HasAVX512ER = true;
     } else if (Feature == "+avx512pf") {
@@ -769,6 +775,8 @@ bool X86TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
       HasAVX512VBMI2 = true;
     } else if (Feature == "+avx512ifma") {
       HasAVX512IFMA = true;
+    } else if (Feature == "+avx512vp2intersect") {
+      HasAVX512VP2INTERSECT = true;
     } else if (Feature == "+sha") {
       HasSHA = true;
     } else if (Feature == "+mpx") {
@@ -1141,6 +1149,8 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__AVX512VPOPCNTDQ__");
   if (HasAVX512VNNI)
     Builder.defineMacro("__AVX512VNNI__");
+  if (HasAVX512BF16)
+    Builder.defineMacro("__AVX512BF16__");
   if (HasAVX512ER)
     Builder.defineMacro("__AVX512ER__");
   if (HasAVX512PF)
@@ -1159,7 +1169,8 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__AVX512VBMI2__");
   if (HasAVX512IFMA)
     Builder.defineMacro("__AVX512IFMA__");
-
+  if (HasAVX512VP2INTERSECT)
+    Builder.defineMacro("__AVX512VP2INTERSECT__");
   if (HasSHA)
     Builder.defineMacro("__SHA__");
 
@@ -1305,6 +1316,7 @@ bool X86TargetInfo::isValidFeatureName(StringRef Name) const {
       .Case("avx512cd", true)
       .Case("avx512vpopcntdq", true)
       .Case("avx512vnni", true)
+      .Case("avx512bf16", true)
       .Case("avx512er", true)
       .Case("avx512pf", true)
       .Case("avx512dq", true)
@@ -1314,6 +1326,7 @@ bool X86TargetInfo::isValidFeatureName(StringRef Name) const {
       .Case("avx512vbmi", true)
       .Case("avx512vbmi2", true)
       .Case("avx512ifma", true)
+      .Case("avx512vp2intersect", true)
       .Case("bmi", true)
       .Case("bmi2", true)
       .Case("cldemote", true)
@@ -1383,6 +1396,7 @@ bool X86TargetInfo::hasFeature(StringRef Feature) const {
       .Case("avx512cd", HasAVX512CD)
       .Case("avx512vpopcntdq", HasAVX512VPOPCNTDQ)
       .Case("avx512vnni", HasAVX512VNNI)
+      .Case("avx512bf16", HasAVX512BF16)
       .Case("avx512er", HasAVX512ER)
       .Case("avx512pf", HasAVX512PF)
       .Case("avx512dq", HasAVX512DQ)
@@ -1392,6 +1406,7 @@ bool X86TargetInfo::hasFeature(StringRef Feature) const {
       .Case("avx512vbmi", HasAVX512VBMI)
       .Case("avx512vbmi2", HasAVX512VBMI2)
       .Case("avx512ifma", HasAVX512IFMA)
+      .Case("avx512vp2intersect", HasAVX512VP2INTERSECT)
       .Case("bmi", HasBMI)
       .Case("bmi2", HasBMI2)
       .Case("cldemote", HasCLDEMOTE)

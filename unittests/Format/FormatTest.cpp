@@ -11150,6 +11150,24 @@ TEST_F(FormatTest, OptimizeBreakPenaltyVsExcess) {
   FormatStyle Style = getLLVMStyle();
   Style.ColumnLimit = 20;
 
+  // See PR41213
+  EXPECT_EQ("/*\n"
+            " *\t9012345\n"
+            " * /8901\n"
+            " */",
+            format("/*\n"
+                   " *\t9012345 /8901\n"
+                   " */",
+                   Style));
+  EXPECT_EQ("/*\n"
+            " *345678\n"
+            " *\t/8901\n"
+            " */",
+            format("/*\n"
+                   " *345678\t/8901\n"
+                   " */",
+                   Style));
+
   verifyFormat("int a; // the\n"
                "       // comment", Style);
   EXPECT_EQ("int a; /* first line\n"
@@ -13525,6 +13543,35 @@ TEST_F(FormatTest, GuessLanguageWithChildLines) {
   EXPECT_EQ(
       FormatStyle::LK_ObjC,
       guessLanguage("foo.h", "#define FOO ({ foo(); ({ NSString *s; }) })"));
+}
+
+TEST_F(FormatTest, TypenameMacros) {
+  std::vector<std::string> TypenameMacros = {"STACK_OF", "LIST", "TAILQ_ENTRY"};
+
+  // Test case reported in https://bugs.llvm.org/show_bug.cgi?id=30353
+  FormatStyle Google = getGoogleStyleWithColumns(0);
+  Google.TypenameMacros = TypenameMacros;
+  verifyFormat("struct foo {\n"
+               "  int bar;\n"
+               "  TAILQ_ENTRY(a) bleh;\n"
+               "};", Google);
+
+  FormatStyle Macros = getLLVMStyle();
+  Macros.TypenameMacros = TypenameMacros;
+
+  verifyFormat("STACK_OF(int) a;", Macros);
+  verifyFormat("STACK_OF(int) *a;", Macros);
+  verifyFormat("STACK_OF(int const *) *a;", Macros);
+  verifyFormat("STACK_OF(int *const) *a;", Macros);
+  verifyFormat("STACK_OF(int, string) a;", Macros);
+  verifyFormat("STACK_OF(LIST(int)) a;", Macros);
+  verifyFormat("STACK_OF(LIST(int)) a, b;", Macros);
+  verifyFormat("for (LIST(int) *a = NULL; a;) {\n}", Macros);
+  verifyFormat("STACK_OF(int) f(LIST(int) *arg);", Macros);
+
+  Macros.PointerAlignment = FormatStyle::PAS_Left;
+  verifyFormat("STACK_OF(int)* a;", Macros);
+  verifyFormat("STACK_OF(int*)* a;", Macros);
 }
 
 } // end namespace

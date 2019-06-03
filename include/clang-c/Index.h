@@ -32,7 +32,7 @@
  * compatible, thus CINDEX_VERSION_MAJOR is expected to remain stable.
  */
 #define CINDEX_VERSION_MAJOR 0
-#define CINDEX_VERSION_MINOR 56
+#define CINDEX_VERSION_MINOR 58
 
 #define CINDEX_VERSION_ENCODE(major, minor) ( \
       ((major) * 10000)                       \
@@ -221,7 +221,12 @@ enum CXCursor_ExceptionSpecificationKind {
   /**
    * The exception specification has not been parsed yet.
    */
-  CXCursor_ExceptionSpecificationKind_Unparsed
+  CXCursor_ExceptionSpecificationKind_Unparsed,
+
+  /**
+   * The cursor has a __declspec(nothrow) exception specification.
+   */
+  CXCursor_ExceptionSpecificationKind_NoThrow
 };
 
 /**
@@ -3931,6 +3936,12 @@ CINDEX_LINKAGE unsigned clang_Cursor_isAnonymous(CXCursor C);
  * declaration.
  */
 CINDEX_LINKAGE unsigned clang_Cursor_isAnonymousRecordDecl(CXCursor C);
+
+/**
+ * Determine whether the given cursor represents an inline namespace
+ * declaration.
+ */
+CINDEX_LINKAGE unsigned clang_Cursor_isInlineNamespace(CXCursor C);
 
 enum CXRefQualifierKind {
   /** No ref-qualifier was provided. */

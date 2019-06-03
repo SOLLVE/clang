@@ -88,6 +88,7 @@ static bool DecodeARMFeatures(const Driver &D, StringRef text,
 
 static void DecodeARMFeaturesFromCPU(const Driver &D, StringRef CPU,
                                      std::vector<StringRef> &Features) {
+  CPU = CPU.split("+").first;
   if (CPU != "generic") {
     llvm::ARM::ArchKind ArchKind = llvm::ARM::parseCPUArch(CPU);
     unsigned Extension = llvm::ARM::getDefaultExtensions(CPU, ArchKind);
@@ -350,11 +351,9 @@ void arm::getARMTargetFeatures(const ToolChain &TC,
       D.Diag(clang::diag::warn_drv_unused_argument)
           << CPUArg->getAsString(Args);
     CPUName = StringRef(WaCPU->getValue()).substr(6);
-    checkARMCPUName(D, WaCPU, Args, CPUName, ArchName, Features, Triple);
-  } else if (CPUArg) {
+    CPUArg = WaCPU;
+  } else if (CPUArg)
     CPUName = CPUArg->getValue();
-    checkARMCPUName(D, CPUArg, Args, CPUName, ArchName, Features, Triple);
-  }
 
   // Add CPU features for generic CPUs
   if (CPUName == "native") {
@@ -367,6 +366,8 @@ void arm::getARMTargetFeatures(const ToolChain &TC,
     DecodeARMFeaturesFromCPU(D, CPUName, Features);
   }
 
+  if (CPUArg)
+    checkARMCPUName(D, CPUArg, Args, CPUName, ArchName, Features, Triple);
   // Honor -mfpu=. ClangAs gives preference to -Wa,-mfpu=.
   const Arg *FPUArg = Args.getLastArg(options::OPT_mfpu_EQ);
   if (WaFPU) {
@@ -429,8 +430,8 @@ fp16_fml_fallthrough:
     llvm::ARM::getFPUFeatures(llvm::ARM::FK_NONE, Features);
 
     // Disable hardware FP features which have been enabled.
-    // FIXME: Disabling vfp2 and neon should be enough as all the other
-    //        features are dependent on these 2 features in LLVM. However
+    // FIXME: Disabling fpregs should be enough all by itself, since all
+    //        the other FP features are dependent on it. However
     //        there is currently no easy way to test this in clang, so for
     //        now just be explicit and disable all known dependent features
     //        as well.
@@ -438,6 +439,11 @@ fp16_fml_fallthrough:
                                 "neon", "crypto", "dotprod", "fp16fml"})
       if (std::find(std::begin(Features), std::end(Features), "+" + Feature) != std::end(Features))
         Features.push_back(Args.MakeArgString("-" + Feature));
+
+    // Disable the base feature unconditionally, even if it was not
+    // explicitly in the features list (e.g. if we had +vfp3, which
+    // implies it).
+    Features.push_back("-fpregs");
   }
 
   // En/disable crc code generation.
@@ -467,6 +473,10 @@ fp16_fml_fallthrough:
         Features.push_back("-aes");
     }
   }
+
+  // CMSE: Check for target 8M (for -mcmse to be applicable) is performed later.
+  if (Args.getLastArg(options::OPT_mcmse))
+    Features.push_back("+8msecext");
 
   // Look for the last occurrence of -mlong-calls or -mno-long-calls. If
   // neither options are specified, see if we are compiling for kernel/kext and
