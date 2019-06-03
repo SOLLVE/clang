@@ -695,6 +695,8 @@ enum OpenMPRTLFunction {
   //
   // Offloading related calls
   //
+  // Call to int64_t __kmpc_mapper_num_components(void *rt_mapper_handle);
+  OMPRTL__kmpc_mapper_num_components,
   // Call to void __kmpc_push_mapper_component(void *rt_mapper_handle, void
   // *base, void *begin, size_t size, int64_t type);
   OMPRTL__kmpc_push_mapper_component,
@@ -2242,6 +2244,14 @@ llvm::FunctionCallee CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
     auto *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg=*/false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, /*Name=*/"__kmpc_free");
+    break;
+  }
+  case OMPRTL__kmpc_mapper_num_components: {
+    // Build int64_t __kmpc_mapper_num_components(void *rt_mapper_handle);
+    llvm::Type *TypeParams[] = {CGM.VoidPtrTy};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.Int64Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_mapper_num_components");
     break;
   }
   case OMPRTL__kmpc_push_mapper_component: {
@@ -8840,6 +8850,15 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
   MappableExprsHandler MEHandler(*D, MapperCGF);
   MEHandler.generateAllInfoForMapper(BasePointers, Pointers, Sizes, MapTypes);
 
+  // Call the runtime API __kmpc_mapper_num_components to get the number of
+  // pre-existing components.
+  llvm::Value *OffloadingArgs[] = {Handle};
+  llvm::Value *PreviousSize = MapperCGF.EmitRuntimeCall(
+      createRuntimeFunction(OMPRTL__kmpc_mapper_num_components),
+      OffloadingArgs);
+  llvm::Value *ShiftedPreviousSize =
+      MapperCGF.Builder.CreateShl(PreviousSize, MapperCGF.Builder.getInt64(48));
+
   // Fill up the runtime mapper handle for all components.
   for (unsigned I = 0; I < BasePointers.size(); ++I) {
     llvm::Value *CurBaseArg = MapperCGF.Builder.CreateBitCast(
@@ -8847,6 +8866,30 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
     llvm::Value *CurBeginArg = MapperCGF.Builder.CreateBitCast(
         Pointers[I], CGM.getTypes().ConvertTypeForMem(C.VoidPtrTy));
     llvm::Value *CurSizeArg = Sizes[I];
+
+    // Extract the MEMBER_OF field from the map type.
+    llvm::BasicBlock *MemberBB = MapperCGF.createBasicBlock("omp.member");
+    MapperCGF.EmitBlock(MemberBB);
+    llvm::Value *OriMapType = MapperCGF.Builder.getInt64(MapTypes[I]);
+    llvm::Value *Member = MapperCGF.Builder.CreateAnd(
+        OriMapType,
+        MapperCGF.Builder.getInt64(MappableExprsHandler::OMP_MAP_MEMBER_OF));
+    llvm::BasicBlock *MemberCombineBB =
+        MapperCGF.createBasicBlock("omp.member.combine");
+    llvm::BasicBlock *TypeBB = MapperCGF.createBasicBlock("omp.type");
+    llvm::Value *IsMember = MapperCGF.Builder.CreateIsNull(Member);
+    MapperCGF.Builder.CreateCondBr(IsMember, TypeBB, MemberCombineBB);
+    // Add the number of pre-existing components to the MEMBER_OF field if it
+    // is valid.
+    MapperCGF.EmitBlock(MemberCombineBB);
+    llvm::Value *CombinedMember =
+        MapperCGF.Builder.CreateAdd(OriMapType, ShiftedPreviousSize);
+    // Do nothing if it is not a member of previous components.
+    MapperCGF.EmitBlock(TypeBB);
+    llvm::PHINode *MemberMapType =
+        MapperCGF.Builder.CreatePHI(CGM.Int64Ty, 4, "omp.membermaptype");
+    MemberMapType->addIncoming(OriMapType, MemberBB);
+    MemberMapType->addIncoming(CombinedMember, MemberCombineBB);
 
     // Combine the map type inherited from user-defined mapper with that
     // specified in the program.
@@ -8857,7 +8900,6 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
     // to     | alloc |  to   | alloc |   to   | release | delete
     // from   | alloc | alloc | from  |  from  | release | delete
     // tofrom | alloc |  to   | from  | tofrom | release | delete
-    llvm::Value *OriMapType = MapperCGF.Builder.getInt64(MapTypes[I]);
     llvm::Value *LeftToFrom = MapperCGF.Builder.CreateAnd(
         MapType,
         MapperCGF.Builder.getInt64(MappableExprsHandler::OMP_MAP_TO |
@@ -8874,7 +8916,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
     // In case of alloc, clear OMP_MAP_TO and OMP_MAP_FROM.
     MapperCGF.EmitBlock(AllocBB);
     llvm::Value *AllocMapType = MapperCGF.Builder.CreateAnd(
-        OriMapType,
+        MemberMapType,
         MapperCGF.Builder.getInt64(~(MappableExprsHandler::OMP_MAP_TO |
                                      MappableExprsHandler::OMP_MAP_FROM)));
     MapperCGF.Builder.CreateBr(EndBB);
@@ -8886,7 +8928,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
     // In case of to, clear OMP_MAP_FROM.
     MapperCGF.EmitBlock(ToBB);
     llvm::Value *ToMapType = MapperCGF.Builder.CreateAnd(
-        OriMapType,
+        MemberMapType,
         MapperCGF.Builder.getInt64(~MappableExprsHandler::OMP_MAP_FROM));
     MapperCGF.Builder.CreateBr(EndBB);
     MapperCGF.EmitBlock(ToElseBB);
@@ -8897,7 +8939,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
     // In case of from, clear OMP_MAP_TO.
     MapperCGF.EmitBlock(FromBB);
     llvm::Value *FromMapType = MapperCGF.Builder.CreateAnd(
-        OriMapType,
+        MemberMapType,
         MapperCGF.Builder.getInt64(~MappableExprsHandler::OMP_MAP_TO));
     // In case of tofrom, do nothing.
     MapperCGF.EmitBlock(EndBB);
@@ -8906,7 +8948,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
     CurMapType->addIncoming(AllocMapType, AllocBB);
     CurMapType->addIncoming(ToMapType, ToBB);
     CurMapType->addIncoming(FromMapType, FromBB);
-    CurMapType->addIncoming(OriMapType, ToElseBB);
+    CurMapType->addIncoming(MemberMapType, ToElseBB);
 
     // Call the runtime API __kmpc_push_mapper_component to fill up the runtime
     // data structure.
