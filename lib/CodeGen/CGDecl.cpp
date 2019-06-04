@@ -144,7 +144,7 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
     return CGM.EmitOMPDeclareReduction(cast<OMPDeclareReductionDecl>(&D), this);
 
   case Decl::OMPDeclareMapper:
-    return CGM.EmitOMPDeclareMapper(cast<OMPDeclareMapperDecl>(&D));
+    return CGM.EmitOMPDeclareMapper(cast<OMPDeclareMapperDecl>(&D), this);
 
   case Decl::Typedef:      // typedef int X;
   case Decl::TypeAlias: {  // using X = int; [C++0x]
@@ -2495,11 +2495,12 @@ void CodeGenModule::EmitOMPDeclareReduction(const OMPDeclareReductionDecl *D,
   getOpenMPRuntime().emitUserDefinedReduction(CGF, D);
 }
 
-void CodeGenModule::EmitOMPDeclareMapper(const OMPDeclareMapperDecl *D) {
+void CodeGenModule::EmitOMPDeclareMapper(const OMPDeclareMapperDecl *D,
+                                         CodeGenFunction *CGF) {
   if (!LangOpts.OpenMP || LangOpts.OpenMPSimd ||
       (!LangOpts.EmitAllDecls && !D->isUsed()))
     return;
-  getOpenMPRuntime().emitUserDefinedMapper(D);
+  getOpenMPRuntime().emitUserDefinedMapper(D, CGF);
 }
 
 void CodeGenModule::EmitOMPRequiresDecl(const OMPRequiresDecl *D) {

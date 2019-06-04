@@ -1680,6 +1680,11 @@ void CGOpenMPRuntime::functionFinished(CodeGenFunction &CGF) {
       UDRMap.erase(D);
     FunctionUDRMap.erase(CGF.CurFn);
   }
+  if (FunctionUDMMap.count(CGF.CurFn) > 0) {
+    for(auto *D : FunctionUDMMap[CGF.CurFn])
+      UDMMap.erase(D);
+    FunctionUDMMap.erase(CGF.CurFn);
+  }
 }
 
 llvm::Type *CGOpenMPRuntime::getIdentTyPointerTy() {
@@ -8744,7 +8749,8 @@ getNestedDistributeDirective(ASTContext &Ctx, const OMPExecutableDirective &D) {
 ///                                  size*sizeof(Ty), clearToFrom(type));
 /// }
 /// \endcode
-void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
+void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
+                                            CodeGenFunction *CGF) {
   if (UDMMap.count(D) > 0)
     return;
   ASTContext &C = CGM.getContext();
@@ -8979,6 +8985,10 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
   MapperCGF.EmitBlock(DoneBB, /*IsFinished=*/true);
   MapperCGF.FinishFunction();
   UDMMap.try_emplace(D, Fn);
+  if (CGF) {
+    auto &Decls = FunctionUDMMap.FindAndConstruct(CGF->CurFn);
+    Decls.second.push_back(D);
+  }
 }
 
 // Emit the array initialization or deletion portion for user-defined mapper
@@ -11110,7 +11120,8 @@ void CGOpenMPSIMDRuntime::emitTargetOutlinedFunction(
   llvm_unreachable("Not supported in SIMD-only mode");
 }
 
-void CGOpenMPSIMDRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D) {
+void CGOpenMPSIMDRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
+                                                CodeGenFunction *CGF) {
   llvm_unreachable("Not supported in SIMD-only mode");
 }
 

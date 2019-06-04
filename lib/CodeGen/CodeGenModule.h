@@ -1257,7 +1257,8 @@ public:
                                CodeGenFunction *CGF = nullptr);
 
   /// Emit a code for declare mapper construct.
-  void EmitOMPDeclareMapper(const OMPDeclareMapperDecl *D);
+  void EmitOMPDeclareMapper(const OMPDeclareMapperDecl *D,
+                            CodeGenFunction *CGF = nullptr);
 
   /// Emit a code for requires directive.
   /// \param D Requires declaration

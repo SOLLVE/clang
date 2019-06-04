@@ -348,6 +348,11 @@ private:
   /// Map from the user-defined mapper declaration to its corresponding
   /// functions.
   llvm::DenseMap<const OMPDeclareMapperDecl *, llvm::Function *> UDMMap;
+  /// Map of functions and their local user-defined mappers.
+  typedef llvm::DenseMap<llvm::Function *,
+                         SmallVector<const OMPDeclareMapperDecl *, 4>>
+      FunctionUDMMapTy;
+  FunctionUDMMapTy FunctionUDMMap;
   /// Type kmp_critical_name, originally defined as typedef kmp_int32
   /// kmp_critical_name[8];
   llvm::ArrayType *KmpCriticalNameTy;
@@ -802,7 +807,8 @@ public:
   getUserDefinedReduction(const OMPDeclareReductionDecl *D);
 
   /// Emit the function for the user defined mapper construct.
-  virtual void emitUserDefinedMapper(const OMPDeclareMapperDecl *D);
+  virtual void emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
+                                     CodeGenFunction *CGF = nullptr);
 
   /// Emit the array initialization or deletion portion for user-defined mapper
   /// code generation.
@@ -2098,7 +2104,8 @@ public:
                                   const RegionCodeGenTy &CodeGen) override;
 
   /// Emit code for the user defined mapper construct.
-  void emitUserDefinedMapper(const OMPDeclareMapperDecl *D) override;
+  void emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
+                             CodeGenFunction *CGF = nullptr) override;
 
   /// Emit the target offloading code associated with \a D. The emitted
   /// code attempts offloading the execution to the device, an the event of
