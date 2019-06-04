@@ -4200,9 +4200,9 @@ protected:
 
   /// Get the user-defined mappers references that are in the trailing objects
   /// of the class.
-  ArrayRef<Expr *> getUDMapperRefs() const {
-    return llvm::makeArrayRef<Expr *>(
-        static_cast<T *>(this)->template getTrailingObjects<Expr *>() +
+  ArrayRef<const Expr *> getUDMapperRefs() const {
+    return llvm::makeArrayRef<const Expr *>(
+        static_cast<const T *>(this)->template getTrailingObjects<Expr *>() +
             OMPVarListClause<T>::varlist_size(),
         OMPVarListClause<T>::varlist_size());
   }
