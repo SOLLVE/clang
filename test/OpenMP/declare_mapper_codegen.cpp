@@ -223,7 +223,7 @@ void foo(int a){
   // CK0: call void [[KERNEL:@.+]](%class.C* [[VAL]])
   #pragma omp target map(mapper(id),tofrom: c)
   {
-   ++c.a;
+    ++c.a;
   }
 
   // CK0-DAG: call void @__tgt_target_data_update(i64 -1, i32 1, i8** [[TGEPBP:%.+]], i8** [[TGEPP:%.+]], i[[sz]]* getelementptr {{.+}}[1 x i[[sz]]]* [[TSIZES]], i32 0, i32 0), {{.+}}getelementptr {{.+}}[1 x i64]* [[TTYPES]]{{.+}})

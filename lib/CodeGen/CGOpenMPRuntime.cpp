@@ -7912,37 +7912,61 @@ public:
 
     // Helper function to fill the information map for the different supported
     // clauses.
-    auto &&InfoGen = [&Info](
-        const ValueDecl *D,
-        OMPClauseMappableExprCommon::MappableExprComponentListRef L,
-        OpenMPMapClauseKind MapType,
-        ArrayRef<OpenMPMapModifierKind> MapModifiers,
-        bool ReturnDevicePointer, bool IsImplicit) {
-      const ValueDecl *VD =
-          D ? cast<ValueDecl>(D->getCanonicalDecl()) : nullptr;
-      Info[VD].emplace_back(L, MapType, MapModifiers, ReturnDevicePointer,
-                            IsImplicit);
-    };
+    auto &&InfoGen =
+        [&Info](const ValueDecl *D,
+                OMPClauseMappableExprCommon::MappableExprComponentListRef L,
+                OpenMPMapClauseKind MapType,
+                ArrayRef<OpenMPMapModifierKind> MapModifiers,
+                bool ReturnDevicePointer, bool IsImplicit,
+                const ValueDecl *Mapper) {
+          const ValueDecl *VD =
+              D ? cast<ValueDecl>(D->getCanonicalDecl()) : nullptr;
+          Info[VD].emplace_back(L, MapType, MapModifiers, ReturnDevicePointer,
+                                IsImplicit, Mapper);
+        };
 
     // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
     assert(this->CurDir.is<const OMPExecutableDirective *>() &&
            "Expect a executable directive");
     const auto *CurExecDir = this->CurDir.get<const OMPExecutableDirective *>();
-    for (const auto *C : CurExecDir->getClausesOfKind<OMPMapClause>())
+    for (const auto *C : CurExecDir->getClausesOfKind<OMPMapClause>()) {
+      auto MapperIT = C->mapperlist_begin();
       for (const auto &L : C->component_lists()) {
+        const ValueDecl *Mapper = nullptr;
+        if (*MapperIT)
+          Mapper = cast<ValueDecl>(cast<DeclRefExpr>(*MapperIT)->getDecl());
         InfoGen(L.first, L.second, C->getMapType(), C->getMapTypeModifiers(),
-            /*ReturnDevicePointer=*/false, C->isImplicit());
+                /*ReturnDevicePointer=*/false, C->isImplicit(), Mapper);
+        MapperIT++;
       }
-    for (const auto *C : CurExecDir->getClausesOfKind<OMPToClause>())
+      assert(MapperIT == C->mapperlist_end() &&
+             "Component and mapper lists are not balanced for a map clause");
+    }
+    for (const auto *C : CurExecDir->getClausesOfKind<OMPToClause>()) {
+      auto MapperIT = C->mapperlist_begin();
       for (const auto &L : C->component_lists()) {
+        const ValueDecl *Mapper = nullptr;
+        if (*MapperIT)
+          Mapper = cast<ValueDecl>(cast<DeclRefExpr>(*MapperIT)->getDecl());
         InfoGen(L.first, L.second, OMPC_MAP_to, llvm::None,
-            /*ReturnDevicePointer=*/false, C->isImplicit());
+                /*ReturnDevicePointer=*/false, C->isImplicit(), Mapper);
+        MapperIT++;
       }
-    for (const auto *C : CurExecDir->getClausesOfKind<OMPFromClause>())
+      assert(MapperIT == C->mapperlist_end() &&
+             "Component and mapper lists are not balanced for a map clause");
+    }
+    for (const auto *C : CurExecDir->getClausesOfKind<OMPFromClause>()) {
+      auto MapperIT = C->mapperlist_begin();
       for (const auto &L : C->component_lists()) {
+        const ValueDecl *Mapper = nullptr;
+        if (*MapperIT)
+          Mapper = cast<ValueDecl>(cast<DeclRefExpr>(*MapperIT)->getDecl());
         InfoGen(L.first, L.second, OMPC_MAP_from, llvm::None,
-            /*ReturnDevicePointer=*/false, C->isImplicit());
+                /*ReturnDevicePointer=*/false, C->isImplicit(), Mapper);
       }
+      assert(MapperIT == C->mapperlist_end() &&
+             "Component and mapper lists are not balanced for a map clause");
+    }
 
     // Look at the use_device_ptr clause information and mark the existing map
     // entries as such. If there is no map information for an entry in the
@@ -7993,7 +8017,7 @@ public:
           // the pointer into account for the calculation of the range of the
           // partial struct.
           InfoGen(nullptr, L.second, OMPC_MAP_unknown, llvm::None,
-                  /*ReturnDevicePointer=*/false, C->isImplicit());
+                  /*ReturnDevicePointer=*/false, C->isImplicit(), nullptr);
           DeferredInfo[nullptr].emplace_back(IE, VD);
         } else {
           llvm::Value *Ptr = this->CGF.EmitLoadOfScalar(
@@ -8002,6 +8026,7 @@ public:
           Pointers.push_back(Ptr);
           Sizes.push_back(llvm::Constant::getNullValue(this->CGF.SizeTy));
           Types.push_back(OMP_MAP_RETURN_PARAM | OMP_MAP_TARGET_PARAM);
+          Mappers.push_back(nullptr);
         }
       }
     }
@@ -8064,6 +8089,7 @@ public:
           // correct value of MEMBER_OF.
           CurTypes.push_back(OMP_MAP_PTR_AND_OBJ | OMP_MAP_RETURN_PARAM |
                              OMP_MAP_MEMBER_OF);
+          CurMappers.push_back(nullptr);
         }
       }
 
@@ -8106,11 +8132,8 @@ public:
             L.first ? cast<ValueDecl>(L.first->getCanonicalDecl()) : nullptr;
         // Get the corresponding user-defined mapper.
         const ValueDecl *Mapper = nullptr;
-        if (*MapperIT) {
-          (*MapperIT)->dump();
+        if (*MapperIT)
           Mapper = cast<ValueDecl>(cast<DeclRefExpr>(*MapperIT)->getDecl());
-        } else
-          std::cerr << "No\n";
         Info[VD].emplace_back(
             L.second, MC->getMapType(), MC->getMapTypeModifiers(),
             /*ReturnDevicePointer=*/false, MC->isImplicit(), Mapper);
@@ -9926,8 +9949,8 @@ void CGOpenMPRuntime::emitTargetDataCalls(
     MappableExprsHandler::MapMappersArrayTy Mappers;
 
     // Get map clause information.
-    MappableExprsHandler MCHandler(D, CGF);
-    MCHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes, Mappers);
+    MappableExprsHandler MEHandler(D, CGF);
+    MEHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes, Mappers);
 
     // Fill up the arrays and create the arguments.
     emitOffloadingArrays(CGF, BasePointers, Pointers, Sizes, MapTypes, Info);
