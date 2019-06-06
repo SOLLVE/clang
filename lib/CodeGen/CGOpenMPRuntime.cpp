@@ -27,6 +27,7 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
+#include <iostream>
 
 using namespace clang;
 using namespace CodeGen;
@@ -7083,6 +7084,7 @@ public:
   using MapBaseValuesArrayTy = SmallVector<BasePointerInfo, 4>;
   using MapValuesArrayTy = SmallVector<llvm::Value *, 4>;
   using MapFlagsArrayTy = SmallVector<OpenMPOffloadMappingFlags, 4>;
+  using MapMappersArrayTy = SmallVector<const ValueDecl *, 4>;
 
   /// Map between a struct and the its lowest & highest elements which have been
   /// mapped.
@@ -7104,15 +7106,17 @@ private:
     ArrayRef<OpenMPMapModifierKind> MapModifiers;
     bool ReturnDevicePointer = false;
     bool IsImplicit = false;
+    const ValueDecl *Mapper = nullptr;
 
     MapInfo() = default;
     MapInfo(
         OMPClauseMappableExprCommon::MappableExprComponentListRef Components,
         OpenMPMapClauseKind MapType,
-        ArrayRef<OpenMPMapModifierKind> MapModifiers,
-        bool ReturnDevicePointer, bool IsImplicit)
+        ArrayRef<OpenMPMapModifierKind> MapModifiers, bool ReturnDevicePointer,
+        bool IsImplicit, const ValueDecl *Mapper = nullptr)
         : Components(Components), MapType(MapType), MapModifiers(MapModifiers),
-          ReturnDevicePointer(ReturnDevicePointer), IsImplicit(IsImplicit) {}
+          ReturnDevicePointer(ReturnDevicePointer), IsImplicit(IsImplicit),
+          Mapper(Mapper) {}
   };
 
   /// If use_device_ptr is used on a pointer which is a struct member and there
@@ -7145,7 +7149,7 @@ private:
       SmallVector<OMPClauseMappableExprCommon::MappableExprComponentListRef, 4>>
       DevPointersMap;
 
-  llvm::Value *getExprTypeSize(const Expr *E) const {
+  llvm::Value *getExprTypeSize(const Expr *E, bool hasMapper) const {
     QualType ExprTy = E->getType().getCanonicalType();
 
     // Reference types are ignored for mapping purposes.
@@ -7162,8 +7166,14 @@ private:
 
       // If there is no length associated with the expression, that means we
       // are using the whole length of the base.
-      if (!OAE->getLength() && OAE->getColonLoc().isValid())
-        return CGF.getTypeSize(BaseTy);
+      if (!OAE->getLength() && OAE->getColonLoc().isValid()) {
+        // In case that a user-defined mapper is attached, its size is the
+        // number of array elements instead of the number of total bytes.
+        if (hasMapper)
+          return CGF.Builder.getInt64(1);
+        else
+          return CGF.getTypeSize(BaseTy);
+      }
 
       llvm::Value *ElemSize;
       if (const auto *PTy = BaseTy->getAs<PointerType>()) {
@@ -7176,15 +7186,31 @@ private:
 
       // If we don't have a length at this point, that is because we have an
       // array section with a single element.
-      if (!OAE->getLength())
-        return ElemSize;
+      if (!OAE->getLength()) {
+        // In case that a user-defined mapper is attached, its size is the
+        // number of array elements instead of the number of total bytes.
+        if (hasMapper)
+          return CGF.Builder.getInt64(1);
+        else
+          return ElemSize;
+      }
 
       llvm::Value *LengthVal = CGF.EmitScalarExpr(OAE->getLength());
       LengthVal =
           CGF.Builder.CreateIntCast(LengthVal, CGF.SizeTy, /*isSigned=*/false);
-      return CGF.Builder.CreateNUWMul(LengthVal, ElemSize);
+      // In case that a user-defined mapper is attached, its size is the
+      // number of array elements instead of the number of total bytes.
+      if (hasMapper)
+        return LengthVal;
+      else
+        return CGF.Builder.CreateNUWMul(LengthVal, ElemSize);
     }
-    return CGF.getTypeSize(ExprTy);
+    // In case that a user-defined mapper is attached, its size is the
+    // number of array elements instead of the number of total bytes.
+    if (hasMapper)
+      return CGF.Builder.getInt64(1);
+    else
+      return CGF.getTypeSize(ExprTy);
   }
 
   /// Return the corresponding bits for a given map clause modifier. Add
@@ -7268,20 +7294,20 @@ private:
     return ConstLength.getSExtValue() != 1;
   }
 
-  /// Generate the base pointers, section pointers, sizes and map type
-  /// bits for the provided map type, map modifier, and expression components.
-  /// \a IsFirstComponent should be set to true if the provided set of
-  /// components is the first associated with a capture.
+  /// Generate the base pointers, section pointers, sizes, map type bits, and
+  /// mappers for the provided map type, map modifier, and expression
+  /// components. \a IsFirstComponent should be set to true if the provided set
+  /// of components is the first associated with a capture.
   void generateInfoForComponentList(
-      OpenMPMapClauseKind MapType,
-      ArrayRef<OpenMPMapModifierKind> MapModifiers,
+      OpenMPMapClauseKind MapType, ArrayRef<OpenMPMapModifierKind> MapModifiers,
       OMPClauseMappableExprCommon::MappableExprComponentListRef Components,
       MapBaseValuesArrayTy &BasePointers, MapValuesArrayTy &Pointers,
       MapValuesArrayTy &Sizes, MapFlagsArrayTy &Types,
-      StructRangeInfoTy &PartialStruct, bool IsFirstComponentList,
-      bool IsImplicit,
+      MapMappersArrayTy &Mappers, StructRangeInfoTy &PartialStruct,
+      bool IsFirstComponentList, bool IsImplicit,
       ArrayRef<OMPClauseMappableExprCommon::MappableExprComponentListRef>
-          OverlappedElements = llvm::None) const {
+          OverlappedElements = llvm::None,
+      const ValueDecl *Mapper = nullptr) const {
     // The following summarizes what has to be generated for each map and the
     // types below. The generated information is expressed in this order:
     // base pointer, section pointer, size, flags
@@ -7516,6 +7542,7 @@ private:
     // whether we are dealing with a member of a declared struct.
     const MemberExpr *EncounteredME = nullptr;
 
+    std::cerr << "Map\n";
     for (; I != CE; ++I) {
       // If the current component is member of a struct (parent struct) mark it.
       if (!EncounteredME) {
@@ -7628,11 +7655,24 @@ private:
           Types.push_back(Flags);
           break;
         }
-        llvm::Value *Size = getExprTypeSize(I->getAssociatedExpression());
         if (!IsMemberPointer) {
           BasePointers.push_back(BP.getPointer());
           Pointers.push_back(LB.getPointer());
+
+          // If Mapper is valid, the last component inherits the mapper.
+          bool hasMapper = Mapper && Next == CE;
+          llvm::Value *Size =
+              getExprTypeSize(I->getAssociatedExpression(), hasMapper);
           Sizes.push_back(Size);
+          if (hasMapper)
+            Mappers.push_back(Mapper);
+          else
+            Mappers.push_back(nullptr);
+          if (hasMapper) {
+            std::cerr << "AM: ";
+            I->getAssociatedExpression()->dump();
+            Size->dump();
+          }
 
           // We need to add a pointer flag for each map that comes from the
           // same expression except for the first one. We also need to signal
@@ -7824,13 +7864,16 @@ public:
   /// individual struct members.
   void emitCombinedEntry(MapBaseValuesArrayTy &BasePointers,
                          MapValuesArrayTy &Pointers, MapValuesArrayTy &Sizes,
-                         MapFlagsArrayTy &Types, MapFlagsArrayTy &CurTypes,
+                         MapFlagsArrayTy &Types, MapMappersArrayTy &Mappers,
+                         MapFlagsArrayTy &CurTypes,
                          const StructRangeInfoTy &PartialStruct) const {
     // Base is the base of the struct
     BasePointers.push_back(PartialStruct.Base.getPointer());
     // Pointer is the address of the lowest element
     llvm::Value *LB = PartialStruct.LowestElem.second.getPointer();
     Pointers.push_back(LB);
+    // There should not be a mapper for a combined entry.
+    Mappers.push_back(nullptr);
     // Size is (addr of {highest+1} element) - (addr of lowest element)
     llvm::Value *HB = PartialStruct.HighestElem.second.getPointer();
     llvm::Value *HAddr = CGF.Builder.CreateConstGEP1_32(HB, /*Idx0=*/1);
@@ -7854,13 +7897,14 @@ public:
       setCorrectMemberOfFlag(M, MemberOfFlag);
   }
 
-  /// Generate all the base pointers, section pointers, sizes and map
-  /// types for the extracted mappable expressions. Also, for each item that
+  /// Generate all the base pointers, section pointers, sizes, map types, and
+  /// mappers for the extracted mappable expressions. Also, for each item that
   /// relates with a device pointer, a pair of the relevant declaration and
   /// index where it occurs is appended to the device pointers info array.
   void generateAllInfo(MapBaseValuesArrayTy &BasePointers,
                        MapValuesArrayTy &Pointers, MapValuesArrayTy &Sizes,
-                       MapFlagsArrayTy &Types) const {
+                       MapFlagsArrayTy &Types,
+                       MapMappersArrayTy &Mappers) const {
     // We have to process the component lists that relate with the same
     // declaration in a single chunk so that we can generate the map flags
     // correctly. Therefore, we organize all lists in a map.
@@ -7972,6 +8016,7 @@ public:
       MapValuesArrayTy CurPointers;
       MapValuesArrayTy CurSizes;
       MapFlagsArrayTy CurTypes;
+      MapMappersArrayTy CurMappers;
       StructRangeInfoTy PartialStruct;
 
       for (const MapInfo &L : M.second) {
@@ -7983,7 +8028,7 @@ public:
         // FIXME: MSVC 2013 seems to require this-> to find the member method.
         this->generateInfoForComponentList(
             L.MapType, L.MapModifiers, L.Components, CurBasePointers,
-            CurPointers, CurSizes, CurTypes, PartialStruct,
+            CurPointers, CurSizes, CurTypes, CurMappers, PartialStruct,
             IsFirstComponentList, L.IsImplicit);
 
         // If this entry relates with a device pointer, set the relevant
@@ -8025,23 +8070,24 @@ public:
       // If there is an entry in PartialStruct it means we have a struct with
       // individual members mapped. Emit an extra combined entry.
       if (PartialStruct.Base.isValid())
-        emitCombinedEntry(BasePointers, Pointers, Sizes, Types, CurTypes,
-                          PartialStruct);
+        emitCombinedEntry(BasePointers, Pointers, Sizes, Types, Mappers,
+                          CurTypes, PartialStruct);
 
       // We need to append the results of this capture to what we already have.
       BasePointers.append(CurBasePointers.begin(), CurBasePointers.end());
       Pointers.append(CurPointers.begin(), CurPointers.end());
       Sizes.append(CurSizes.begin(), CurSizes.end());
       Types.append(CurTypes.begin(), CurTypes.end());
+      Mappers.append(CurMappers.begin(), CurMappers.end());
     }
   }
 
-  /// Generate all the base pointers, section pointers, sizes and map types for
-  /// the extracted map clauses of user-defined mapper.
+  /// Generate all the base pointers, section pointers, sizes, map types, and
+  /// mappers for the extracted map clauses of user-defined mapper.
   void generateAllInfoForMapper(MapBaseValuesArrayTy &BasePointers,
                                 MapValuesArrayTy &Pointers,
-                                MapValuesArrayTy &Sizes,
-                                MapFlagsArrayTy &Types) const {
+                                MapValuesArrayTy &Sizes, MapFlagsArrayTy &Types,
+                                MapMappersArrayTy &Mappers) const {
     // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
     assert(this->CurDir.is<const OMPDeclareMapperDecl *>() &&
            "Expect a declare mapper directive");
@@ -8051,26 +8097,27 @@ public:
     // correctly. Therefore, we organize all lists in a map.
     llvm::MapVector<const ValueDecl *, SmallVector<MapInfo, 8>> Info;
 
-    // Helper function to fill the information map for the different supported
-    // clauses.
-    auto &&InfoGen = [&Info](
-        const ValueDecl *D,
-        OMPClauseMappableExprCommon::MappableExprComponentListRef L,
-        OpenMPMapClauseKind MapType,
-        ArrayRef<OpenMPMapModifierKind> MapModifiers,
-        bool ReturnDevicePointer, bool IsImplicit) {
-      const ValueDecl *VD =
-          D ? cast<ValueDecl>(D->getCanonicalDecl()) : nullptr;
-      Info[VD].emplace_back(L, MapType, MapModifiers, ReturnDevicePointer,
-                            IsImplicit);
-    };
-
+    // Fill the information map for map clauses.
     for (const auto *C : CurMapperDir->clauselists()) {
-      const auto *MC = cast<OMPMapClause>(C);
+      const auto *MC = cast<const OMPMapClause>(C);
+      auto MapperIT = MC->mapperlist_begin();
       for (const auto &L : MC->component_lists()) {
-        InfoGen(L.first, L.second, MC->getMapType(), MC->getMapTypeModifiers(),
-                /*ReturnDevicePointer=*/false, MC->isImplicit());
+        const ValueDecl *VD =
+            L.first ? cast<ValueDecl>(L.first->getCanonicalDecl()) : nullptr;
+        // Get the corresponding user-defined mapper.
+        const ValueDecl *Mapper = nullptr;
+        if (*MapperIT) {
+          (*MapperIT)->dump();
+          Mapper = cast<ValueDecl>(cast<DeclRefExpr>(*MapperIT)->getDecl());
+        } else
+          std::cerr << "No\n";
+        Info[VD].emplace_back(
+            L.second, MC->getMapType(), MC->getMapTypeModifiers(),
+            /*ReturnDevicePointer=*/false, MC->isImplicit(), Mapper);
+        MapperIT++;
       }
+      assert(MapperIT == MC->mapperlist_end() &&
+             "Component and mapper lists are not balanced for a map clause");
     }
 
     for (const auto &M : Info) {
@@ -8083,6 +8130,7 @@ public:
       MapValuesArrayTy CurPointers;
       MapValuesArrayTy CurSizes;
       MapFlagsArrayTy CurTypes;
+      MapMappersArrayTy CurMappers;
       StructRangeInfoTy PartialStruct;
 
       for (const MapInfo &L : M.second) {
@@ -8091,22 +8139,24 @@ public:
         // FIXME: MSVC 2013 seems to require this-> to find the member method.
         this->generateInfoForComponentList(
             L.MapType, L.MapModifiers, L.Components, CurBasePointers,
-            CurPointers, CurSizes, CurTypes, PartialStruct,
-            IsFirstComponentList, L.IsImplicit);
+            CurPointers, CurSizes, CurTypes, CurMappers, PartialStruct,
+            IsFirstComponentList, L.IsImplicit,
+            /*OverlappedElements=*/llvm::None, L.Mapper);
         IsFirstComponentList = false;
       }
 
       // If there is an entry in PartialStruct it means we have a struct with
       // individual members mapped. Emit an extra combined entry.
       if (PartialStruct.Base.isValid())
-        emitCombinedEntry(BasePointers, Pointers, Sizes, Types, CurTypes,
-                          PartialStruct);
+        emitCombinedEntry(BasePointers, Pointers, Sizes, Types, Mappers,
+                          CurTypes, PartialStruct);
 
       // We need to append the results of this capture to what we already have.
       BasePointers.append(CurBasePointers.begin(), CurBasePointers.end());
       Pointers.append(CurPointers.begin(), CurPointers.end());
       Sizes.append(CurSizes.begin(), CurSizes.end());
       Types.append(CurTypes.begin(), CurTypes.end());
+      Mappers.append(CurMappers.begin(), CurMappers.end());
     }
   }
 
@@ -8330,6 +8380,7 @@ public:
 
     // Associated with a capture, because the mapping flags depend on it.
     // Go through all of the elements with the overlapped elements.
+    MapMappersArrayTy Mappers;
     for (const auto &Pair : OverlappedData) {
       const MapData &L = *Pair.getFirst();
       OMPClauseMappableExprCommon::MappableExprComponentListRef Components;
@@ -8342,7 +8393,7 @@ public:
       bool IsFirstComponentList = true;
       generateInfoForComponentList(MapType, MapModifiers, Components,
                                    BasePointers, Pointers, Sizes, Types,
-                                   PartialStruct, IsFirstComponentList,
+                                   Mappers, PartialStruct, IsFirstComponentList,
                                    IsImplicit, OverlappedComponents);
     }
     // Go through other elements without overlapped elements.
@@ -8355,10 +8406,9 @@ public:
       std::tie(Components, MapType, MapModifiers, IsImplicit) = L;
       auto It = OverlappedData.find(&L);
       if (It == OverlappedData.end())
-        generateInfoForComponentList(MapType, MapModifiers, Components,
-                                     BasePointers, Pointers, Sizes, Types,
-                                     PartialStruct, IsFirstComponentList,
-                                     IsImplicit);
+        generateInfoForComponentList(
+            MapType, MapModifiers, Components, BasePointers, Pointers, Sizes,
+            Types, Mappers, PartialStruct, IsFirstComponentList, IsImplicit);
       IsFirstComponentList = false;
     }
   }
@@ -8386,10 +8436,11 @@ public:
             OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD);
         if (!Res || *Res != OMPDeclareTargetDeclAttr::MT_Link)
           continue;
+        MapMappersArrayTy Mappers;
         StructRangeInfoTy PartialStruct;
         generateInfoForComponentList(
             C->getMapType(), C->getMapTypeModifiers(), L.second, BasePointers,
-            Pointers, Sizes, Types, PartialStruct,
+            Pointers, Sizes, Types, Mappers, PartialStruct,
             /*IsFirstComponentList=*/true, C->isImplicit());
         assert(!PartialStruct.Base.isValid() &&
                "No partial structs for declare target link expected.");
@@ -8853,8 +8904,10 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
   MappableExprsHandler::MapValuesArrayTy Pointers;
   MappableExprsHandler::MapValuesArrayTy Sizes;
   MappableExprsHandler::MapFlagsArrayTy MapTypes;
+  MappableExprsHandler::MapMappersArrayTy Mappers;
   MappableExprsHandler MEHandler(*D, MapperCGF);
-  MEHandler.generateAllInfoForMapper(BasePointers, Pointers, Sizes, MapTypes);
+  MEHandler.generateAllInfoForMapper(BasePointers, Pointers, Sizes, MapTypes,
+                                     Mappers);
 
   // Call the runtime API __kmpc_mapper_num_components to get the number of
   // pre-existing components.
@@ -8956,13 +9009,21 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
     CurMapType->addIncoming(FromMapType, FromBB);
     CurMapType->addIncoming(MemberMapType, ToElseBB);
 
-    // Call the runtime API __kmpc_push_mapper_component to fill up the runtime
-    // data structure.
     llvm::Value *OffloadingArgs[] = {Handle, CurBaseArg, CurBeginArg,
                                      CurSizeArg, CurMapType};
-    MapperCGF.EmitRuntimeCall(
-        createRuntimeFunction(OMPRTL__kmpc_push_mapper_component),
-        OffloadingArgs);
+    if (Mappers[I]) {
+      // Call the corresponding mapper function.
+      llvm::Function *MapperFunc =
+          getUserDefinedMapperFunc(cast<OMPDeclareMapperDecl>(Mappers[I]));
+      assert(MapperFunc && "Expect a valid mapper function is available.");
+      MapperCGF.Builder.CreateCall(MapperFunc, OffloadingArgs);
+    } else {
+      // Call the runtime API __kmpc_push_mapper_component to fill up the
+      // runtime data structure.
+      MapperCGF.EmitRuntimeCall(
+          createRuntimeFunction(OMPRTL__kmpc_push_mapper_component),
+          OffloadingArgs);
+    }
   }
 
   // Update the pointer to point to the next element that needs to be mapped,
@@ -9043,6 +9104,15 @@ void CGOpenMPRuntime::emitUDMapperArrayInitOrDel(
   MapperCGF.EmitRuntimeCall(
       createRuntimeFunction(OMPRTL__kmpc_push_mapper_component),
       OffloadingArgs);
+}
+
+llvm::Function *
+CGOpenMPRuntime::getUserDefinedMapperFunc(const OMPDeclareMapperDecl *D) {
+  auto I = UDMMap.find(D);
+  if (I != UDMMap.end())
+    return I->second;
+  emitUserDefinedMapper(D);
+  return UDMMap.lookup(D);
 }
 
 void CGOpenMPRuntime::emitTargetNumIterationsCall(
@@ -9233,6 +9303,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
     MappableExprsHandler::MapValuesArrayTy Pointers;
     MappableExprsHandler::MapValuesArrayTy Sizes;
     MappableExprsHandler::MapFlagsArrayTy MapTypes;
+    MappableExprsHandler::MapMappersArrayTy Mappers;
 
     // Get mappable expression information.
     MappableExprsHandler MEHandler(D, CGF);
@@ -9247,6 +9318,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       MappableExprsHandler::MapValuesArrayTy CurPointers;
       MappableExprsHandler::MapValuesArrayTy CurSizes;
       MappableExprsHandler::MapFlagsArrayTy CurMapTypes;
+      MappableExprsHandler::MapMappersArrayTy CurMappers;
       MappableExprsHandler::StructRangeInfoTy PartialStruct;
 
       // VLA sizes are passed to the outlined region by copy and do not have map
@@ -9285,13 +9357,14 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       // individual members mapped. Emit an extra combined entry.
       if (PartialStruct.Base.isValid())
         MEHandler.emitCombinedEntry(BasePointers, Pointers, Sizes, MapTypes,
-                                    CurMapTypes, PartialStruct);
+                                    Mappers, CurMapTypes, PartialStruct);
 
       // We need to append the results of this capture to what we already have.
       BasePointers.append(CurBasePointers.begin(), CurBasePointers.end());
       Pointers.append(CurPointers.begin(), CurPointers.end());
       Sizes.append(CurSizes.begin(), CurSizes.end());
       MapTypes.append(CurMapTypes.begin(), CurMapTypes.end());
+      Mappers.append(CurMappers.begin(), CurMappers.end());
     }
     // Adjust MEMBER_OF flags for the lambdas captures.
     MEHandler.adjustMemberOfForLambdaCaptures(LambdaPointers, BasePointers,
@@ -9850,10 +9923,11 @@ void CGOpenMPRuntime::emitTargetDataCalls(
     MappableExprsHandler::MapValuesArrayTy Pointers;
     MappableExprsHandler::MapValuesArrayTy Sizes;
     MappableExprsHandler::MapFlagsArrayTy MapTypes;
+    MappableExprsHandler::MapMappersArrayTy Mappers;
 
     // Get map clause information.
     MappableExprsHandler MCHandler(D, CGF);
-    MCHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes);
+    MCHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes, Mappers);
 
     // Fill up the arrays and create the arguments.
     emitOffloadingArrays(CGF, BasePointers, Pointers, Sizes, MapTypes, Info);
@@ -10076,10 +10150,11 @@ void CGOpenMPRuntime::emitTargetDataStandAloneCall(
     MappableExprsHandler::MapValuesArrayTy Pointers;
     MappableExprsHandler::MapValuesArrayTy Sizes;
     MappableExprsHandler::MapFlagsArrayTy MapTypes;
+    MappableExprsHandler::MapMappersArrayTy Mappers;
 
     // Get map clause information.
     MappableExprsHandler MEHandler(D, CGF);
-    MEHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes);
+    MEHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes, Mappers);
 
     TargetDataInfo Info;
     // Fill up the arrays and create the arguments.

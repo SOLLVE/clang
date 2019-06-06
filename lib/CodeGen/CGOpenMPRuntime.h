@@ -806,9 +806,12 @@ public:
   virtual std::pair<llvm::Function *, llvm::Function *>
   getUserDefinedReduction(const OMPDeclareReductionDecl *D);
 
-  /// Emit the function for the user defined mapper construct.
+  /// Emit the function for the user-defined mapper construct.
   virtual void emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
                                      CodeGenFunction *CGF = nullptr);
+  /// Get the function for the specified user-defined mapper, if any.
+  virtual llvm::Function *
+  getUserDefinedMapperFunc(const OMPDeclareMapperDecl *D);
 
   /// Emit the array initialization or deletion portion for user-defined mapper
   /// code generation.
