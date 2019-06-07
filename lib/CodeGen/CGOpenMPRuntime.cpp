@@ -696,11 +696,6 @@ enum OpenMPRTLFunction {
   //
   // Offloading related calls
   //
-  // Call to int64_t __kmpc_mapper_num_components(void *rt_mapper_handle);
-  OMPRTL__kmpc_mapper_num_components,
-  // Call to void __kmpc_push_mapper_component(void *rt_mapper_handle, void
-  // *base, void *begin, size_t size, int64_t type);
-  OMPRTL__kmpc_push_mapper_component,
   // Call to void __kmpc_push_target_tripcount(int64_t device_id, kmp_uint64
   // size);
   OMPRTL__kmpc_push_target_tripcount,
@@ -747,6 +742,11 @@ enum OpenMPRTLFunction {
   // arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
   // *arg_types);
   OMPRTL__tgt_target_data_update_nowait,
+  // Call to int64_t __tgt_mapper_num_components(void *rt_mapper_handle);
+  OMPRTL__tgt_mapper_num_components,
+  // Call to void __tgt_push_mapper_component(void *rt_mapper_handle, void
+  // *base, void *begin, size_t size, int64_t type);
+  OMPRTL__tgt_push_mapper_component,
 };
 
 /// A basic class for pre|post-action for advanced codegen sequence for OpenMP
@@ -2252,24 +2252,6 @@ llvm::FunctionCallee CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
     RTLFn = CGM.CreateRuntimeFunction(FnTy, /*Name=*/"__kmpc_free");
     break;
   }
-  case OMPRTL__kmpc_mapper_num_components: {
-    // Build int64_t __kmpc_mapper_num_components(void *rt_mapper_handle);
-    llvm::Type *TypeParams[] = {CGM.VoidPtrTy};
-    auto *FnTy =
-        llvm::FunctionType::get(CGM.Int64Ty, TypeParams, /*isVarArg*/ false);
-    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_mapper_num_components");
-    break;
-  }
-  case OMPRTL__kmpc_push_mapper_component: {
-    // Build void __kmpc_push_mapper_component(void *rt_mapper_handle, void
-    // *base, void *begin, size_t size, int64_t type);
-    llvm::Type *TypeParams[] = {CGM.VoidPtrTy, CGM.VoidPtrTy, CGM.VoidPtrTy,
-                                CGM.SizeTy, CGM.Int64Ty};
-    auto *FnTy =
-        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
-    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_push_mapper_component");
-    break;
-  }
   case OMPRTL__kmpc_push_target_tripcount: {
     // Build void __kmpc_push_target_tripcount(int64_t device_id, kmp_uint64
     // size);
@@ -2460,6 +2442,24 @@ llvm::FunctionCallee CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
     auto *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg=*/false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_data_update_nowait");
+    break;
+  }
+  case OMPRTL__tgt_mapper_num_components: {
+    // Build int64_t __tgt_mapper_num_components(void *rt_mapper_handle);
+    llvm::Type *TypeParams[] = {CGM.VoidPtrTy};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.Int64Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_mapper_num_components");
+    break;
+  }
+  case OMPRTL__tgt_push_mapper_component: {
+    // Build void __tgt_push_mapper_component(void *rt_mapper_handle, void
+    // *base, void *begin, size_t size, int64_t type);
+    llvm::Type *TypeParams[] = {CGM.VoidPtrTy, CGM.VoidPtrTy, CGM.VoidPtrTy,
+                                CGM.SizeTy, CGM.Int64Ty};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_push_mapper_component");
     break;
   }
   }
@@ -8805,7 +8805,7 @@ getNestedDistributeDirective(ASTContext &Ctx, const OMPExecutableDirective &D) {
 ///                                           size_t size, int64_t type) {
 ///   // Allocate space for an array section first.
 ///   if (size > 1 && !maptype.IsDelete)
-///     __kmpc_push_mapper_component(rt_mapper_handle, base, begin,
+///     __tgt_push_mapper_component(rt_mapper_handle, base, begin,
 ///                                  size*sizeof(Ty), clearToFrom(type));
 ///   // Map members.
 ///   for (unsigned i = 0; i < size; i++) {
@@ -8814,12 +8814,12 @@ getNestedDistributeDirective(ASTContext &Ctx, const OMPExecutableDirective &D) {
 ///       (*currentComponent.Mapper())(rt_mapper_handle, arg_base, arg_begin,
 ///                                    arg_size, arg_type);
 ///     else
-///       __kmpc_push_mapper_component(rt_mapper_handle, arg_base, arg_begin,
+///       __tgt_push_mapper_component(rt_mapper_handle, arg_base, arg_begin,
 ///                                    arg_size, arg_type);
 ///   }
 ///   // Delete the array section.
 ///   if (size > 1 && maptype.IsDelete)
-///     __kmpc_push_mapper_component(rt_mapper_handle, base, begin,
+///     __tgt_push_mapper_component(rt_mapper_handle, base, begin,
 ///                                  size*sizeof(Ty), clearToFrom(type));
 /// }
 /// \endcode
@@ -8932,12 +8932,11 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
   MEHandler.generateAllInfoForMapper(BasePointers, Pointers, Sizes, MapTypes,
                                      Mappers);
 
-  // Call the runtime API __kmpc_mapper_num_components to get the number of
+  // Call the runtime API __tgt_mapper_num_components to get the number of
   // pre-existing components.
   llvm::Value *OffloadingArgs[] = {Handle};
   llvm::Value *PreviousSize = MapperCGF.EmitRuntimeCall(
-      createRuntimeFunction(OMPRTL__kmpc_mapper_num_components),
-      OffloadingArgs);
+      createRuntimeFunction(OMPRTL__tgt_mapper_num_components), OffloadingArgs);
   llvm::Value *ShiftedPreviousSize =
       MapperCGF.Builder.CreateShl(PreviousSize, MapperCGF.Builder.getInt64(48));
 
@@ -9041,10 +9040,10 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
       assert(MapperFunc && "Expect a valid mapper function is available.");
       MapperCGF.Builder.CreateCall(MapperFunc, OffloadingArgs);
     } else {
-      // Call the runtime API __kmpc_push_mapper_component to fill up the
-      // runtime data structure.
+      // Call the runtime API __tgt_push_mapper_component to fill up the runtime
+      // data structure.
       MapperCGF.EmitRuntimeCall(
-          createRuntimeFunction(OMPRTL__kmpc_push_mapper_component),
+          createRuntimeFunction(OMPRTL__tgt_push_mapper_component),
           OffloadingArgs);
     }
   }
@@ -9121,12 +9120,11 @@ void CGOpenMPRuntime::emitUDMapperArrayInitOrDel(
       MapType,
       MapperCGF.Builder.getInt64(~(MappableExprsHandler::OMP_MAP_TO |
                                    MappableExprsHandler::OMP_MAP_FROM)));
-  // Call the runtime API __kmpc_push_mapper_component to fill up the runtime
+  // Call the runtime API __tgt_push_mapper_component to fill up the runtime
   // data structure.
   llvm::Value *OffloadingArgs[] = {Handle, Base, Begin, ArraySize, MapTypeArg};
   MapperCGF.EmitRuntimeCall(
-      createRuntimeFunction(OMPRTL__kmpc_push_mapper_component),
-      OffloadingArgs);
+      createRuntimeFunction(OMPRTL__tgt_push_mapper_component), OffloadingArgs);
 }
 
 llvm::Function *
