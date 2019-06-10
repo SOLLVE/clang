@@ -7582,7 +7582,6 @@ private:
     // whether we are dealing with a member of a declared struct.
     const MemberExpr *EncounteredME = nullptr;
 
-    std::cerr << "Map\n";
     for (; I != CE; ++I) {
       // If the current component is member of a struct (parent struct) mark it.
       if (!EncounteredME) {
@@ -7711,9 +7710,9 @@ private:
           else
             Mappers.push_back(nullptr);
           if (hasMapper) {
-            std::cerr << "AM: ";
+            std::cerr << "AM: " << Mappers.size() << " ";
             I->getAssociatedExpression()->dump();
-            Size->dump();
+            //Size->dump();
           }
 
           // We need to add a pointer flag for each map that comes from the
@@ -8096,7 +8095,8 @@ public:
         this->generateInfoForComponentList(
             L.MapType, L.MapModifiers, L.Components, CurBasePointers,
             CurPointers, CurSizes, CurTypes, CurMappers, PartialStruct,
-            IsFirstComponentList, L.IsImplicit);
+            IsFirstComponentList, L.IsImplicit,
+            /*OverlappedElements=*/llvm::None, L.Mapper);
 
         // If this entry relates with a device pointer, set the relevant
         // declaration and add the 'return pointer' flag.
@@ -8603,7 +8603,7 @@ enum OpenMPOffloadingReservedDeviceIDs {
 /// offloading runtime library. If there is no map or capture information,
 /// return nullptr by reference.
 static void
-emitOffloadingArrays(CodeGenFunction &CGF, CGOpenMPRuntime *CGOMP,
+emitOffloadingArrays(CodeGenFunction &CGF,
                      MappableExprsHandler::MapBaseValuesArrayTy &BasePointers,
                      MappableExprsHandler::MapValuesArrayTy &Pointers,
                      MappableExprsHandler::MapValuesArrayTy &Sizes,
@@ -8719,7 +8719,6 @@ emitOffloadingArrays(CodeGenFunction &CGF, CGOpenMPRuntime *CGOMP,
       // Fill up the mapper array.
       llvm::Value *MFunc = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
       if (Mappers[I])
-        //MFunc = CGOMP->getUserDefinedMapperFunc(
         MFunc = CGM.getOpenMPRuntime().getUserDefinedMapperFunc(
             cast<OMPDeclareMapperDecl>(Mappers[I]));
       llvm::Value *M = CGF.Builder.CreateConstInBoundsGEP2_32(
@@ -9473,8 +9472,8 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
 
     TargetDataInfo Info;
     // Fill up the arrays and create the arguments.
-    emitOffloadingArrays(CGF, this, BasePointers, Pointers, Sizes, MapTypes,
-                         Mappers, Info);
+    emitOffloadingArrays(CGF, BasePointers, Pointers, Sizes, MapTypes, Mappers,
+                         Info);
     emitOffloadingArraysArgument(CGF, Info.BasePointersArray,
                                  Info.PointersArray, Info.SizesArray,
                                  Info.MapTypesArray, Info.MappersArray, Info);
@@ -10029,8 +10028,8 @@ void CGOpenMPRuntime::emitTargetDataCalls(
     MEHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes, Mappers);
 
     // Fill up the arrays and create the arguments.
-    emitOffloadingArrays(CGF, this, BasePointers, Pointers, Sizes, MapTypes,
-                         Mappers, Info);
+    emitOffloadingArrays(CGF, BasePointers, Pointers, Sizes, MapTypes, Mappers,
+                         Info);
 
     llvm::Value *BasePointersArrayArg = nullptr;
     llvm::Value *PointersArrayArg = nullptr;
@@ -10264,8 +10263,8 @@ void CGOpenMPRuntime::emitTargetDataStandAloneCall(
 
     TargetDataInfo Info;
     // Fill up the arrays and create the arguments.
-    emitOffloadingArrays(CGF, this, BasePointers, Pointers, Sizes, MapTypes,
-                         Mappers, Info);
+    emitOffloadingArrays(CGF, BasePointers, Pointers, Sizes, MapTypes, Mappers,
+                         Info);
     emitOffloadingArraysArgument(CGF, Info.BasePointersArray,
                                  Info.PointersArray, Info.SizesArray,
                                  Info.MapTypesArray, Info.MappersArray, Info);
