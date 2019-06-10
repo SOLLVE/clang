@@ -742,14 +742,48 @@ enum OpenMPRTLFunction {
   // arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
   // *arg_types);
   OMPRTL__tgt_target_data_update_nowait,
+  // Call to int32_t __tgt_target_mapper(int64_t device_id, void *host_ptr,
+  // int32_t arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
+  // *arg_types, void **arg_mappers);
+  OMPRTL__tgt_target_mapper,
+  // Call to int32_t __tgt_target_nowait_mapper(int64_t device_id, void
+  // *host_ptr, int32_t arg_num, void** args_base, void **args, size_t
+  // *arg_sizes, int64_t *arg_types, void **arg_mappers);
+  OMPRTL__tgt_target_nowait_mapper,
+  // Call to int32_t __tgt_target_teams_mapper(int64_t device_id, void
+  // *host_ptr, int32_t arg_num, void** args_base, void **args, size_t
+  // *arg_sizes, int64_t *arg_types, void **arg_mappers, int32_t num_teams,
+  // int32_t thread_limit);
+  OMPRTL__tgt_target_teams_mapper,
+  // Call to int32_t __tgt_target_teams_nowait_mapper(int64_t device_id, void
+  // *host_ptr, int32_t arg_num, void** args_base, void **args, size_t
+  // *arg_sizes, int64_t *arg_types, void **arg_mappers, int32_t num_teams,
+  // int32_t thread_limit);
+  OMPRTL__tgt_target_teams_nowait_mapper,
   // Call to void __tgt_target_data_begin_mapper(int64_t device_id, int32_t
   // arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
   // *arg_types, void **arg_mappers);
   OMPRTL__tgt_target_data_begin_mapper,
+  // Call to void __tgt_target_data_begin_nowait_mapper(int64_t device_id,
+  // int32_t arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
+  // *arg_types, void **arg_mappers);
+  OMPRTL__tgt_target_data_begin_nowait_mapper,
   // Call to void __tgt_target_data_end_mapper(int64_t device_id, int32_t
   // arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
   // *arg_types, void **arg_mappers);
   OMPRTL__tgt_target_data_end_mapper,
+  // Call to void __tgt_target_data_end_nowait_mapper(int64_t device_id, int32_t
+  // arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
+  // *arg_types, void **arg_mappers);
+  OMPRTL__tgt_target_data_end_nowait_mapper,
+  // Call to void __tgt_target_data_update_mapper(int64_t device_id, int32_t
+  // arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
+  // *arg_types, void **arg_mappers);
+  OMPRTL__tgt_target_data_update_mapper,
+  // Call to void __tgt_target_data_update_nowait_mapper(int64_t device_id,
+  // int32_t arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
+  // *arg_types, void **arg_mappers);
+  OMPRTL__tgt_target_data_update_nowait_mapper,
   // Call to int64_t __tgt_mapper_num_components(void *rt_mapper_handle);
   OMPRTL__tgt_mapper_num_components,
   // Call to void __tgt_push_mapper_component(void *rt_mapper_handle, void
@@ -2452,6 +2486,80 @@ llvm::FunctionCallee CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_data_update_nowait");
     break;
   }
+  case OMPRTL__tgt_target_mapper: {
+    // Build int32_t __tgt_target_mapper(int64_t device_id, void *host_ptr,
+    // int32_t arg_num, void** args_base, void **args, size_t *arg_sizes,
+    // int64_t *arg_types, void **arg_mappers);
+    llvm::Type *TypeParams[] = {CGM.Int64Ty,
+                                CGM.VoidPtrTy,
+                                CGM.Int32Ty,
+                                CGM.VoidPtrPtrTy,
+                                CGM.VoidPtrPtrTy,
+                                CGM.SizeTy->getPointerTo(),
+                                CGM.Int64Ty->getPointerTo(),
+                                CGM.VoidPtrPtrTy};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_mapper");
+    break;
+  }
+  case OMPRTL__tgt_target_nowait_mapper: {
+    // Build int32_t __tgt_target_nowait_mapper(int64_t device_id, void
+    // *host_ptr, int32_t arg_num, void** args_base, void **args, size_t
+    // *arg_sizes, int64_t *arg_types, void **arg_mappers);
+    llvm::Type *TypeParams[] = {CGM.Int64Ty,
+                                CGM.VoidPtrTy,
+                                CGM.Int32Ty,
+                                CGM.VoidPtrPtrTy,
+                                CGM.VoidPtrPtrTy,
+                                CGM.SizeTy->getPointerTo(),
+                                CGM.Int64Ty->getPointerTo(),
+                                CGM.VoidPtrPtrTy};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_nowait_mapper");
+    break;
+  }
+  case OMPRTL__tgt_target_teams_mapper: {
+    // Build int32_t __tgt_target_teams_mapper(int64_t device_id, void
+    // *host_ptr, int32_t arg_num, void** args_base, void **args, size_t
+    // *arg_sizes, int64_t *arg_types, void **arg_mappers, int32_t num_teams,
+    // int32_t thread_limit);
+    llvm::Type *TypeParams[] = {CGM.Int64Ty,
+                                CGM.VoidPtrTy,
+                                CGM.Int32Ty,
+                                CGM.VoidPtrPtrTy,
+                                CGM.VoidPtrPtrTy,
+                                CGM.SizeTy->getPointerTo(),
+                                CGM.Int64Ty->getPointerTo(),
+                                CGM.VoidPtrPtrTy,
+                                CGM.Int32Ty,
+                                CGM.Int32Ty};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_teams_mapper");
+    break;
+  }
+  case OMPRTL__tgt_target_teams_nowait_mapper: {
+    // Build int32_t __tgt_target_teams_nowait_mapper(int64_t device_id, void
+    // *host_ptr, int32_t arg_num, void** args_base, void **args, size_t
+    // *arg_sizes, int64_t *arg_types, void **arg_mappers, int32_t num_teams,
+    // int32_t thread_limit);
+    llvm::Type *TypeParams[] = {CGM.Int64Ty,
+                                CGM.VoidPtrTy,
+                                CGM.Int32Ty,
+                                CGM.VoidPtrPtrTy,
+                                CGM.VoidPtrPtrTy,
+                                CGM.SizeTy->getPointerTo(),
+                                CGM.Int64Ty->getPointerTo(),
+                                CGM.VoidPtrPtrTy,
+                                CGM.Int32Ty,
+                                CGM.Int32Ty};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_teams_nowait_mapper");
+    break;
+  }
   case OMPRTL__tgt_target_data_begin_mapper: {
     // Build void __tgt_target_data_begin_mapper(int64_t device_id, int32_t
     // arg_num, void **args_base, void **args, size_t *arg_sizes, int64_t
@@ -2468,6 +2576,23 @@ llvm::FunctionCallee CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_data_begin_mapper");
     break;
   }
+  case OMPRTL__tgt_target_data_begin_nowait_mapper: {
+    // Build void __tgt_target_data_begin_nowait_mapper(int64_t device_id,
+    // int32_t arg_num, void** args_base, void **args, size_t *arg_sizes,
+    // int64_t *arg_types, void **arg_mappers);
+    llvm::Type *TypeParams[] = {CGM.Int64Ty,
+                                CGM.Int32Ty,
+                                CGM.VoidPtrPtrTy,
+                                CGM.VoidPtrPtrTy,
+                                CGM.SizeTy->getPointerTo(),
+                                CGM.Int64Ty->getPointerTo(),
+                                CGM.VoidPtrPtrTy};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg=*/false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy,
+                                      "__tgt_target_data_begin_nowait_mapper");
+    break;
+  }
   case OMPRTL__tgt_target_data_end_mapper: {
     // Build void __tgt_target_data_end_mapper(int64_t device_id, int32_t
     // arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
@@ -2482,6 +2607,56 @@ llvm::FunctionCallee CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
     auto *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_data_end_mapper");
+    break;
+  }
+  case OMPRTL__tgt_target_data_end_nowait_mapper: {
+    // Build void __tgt_target_data_end_nowait_mapper(int64_t device_id, int32_t
+    // arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
+    // *arg_types, void **arg_mappers);
+    llvm::Type *TypeParams[] = {CGM.Int64Ty,
+                                CGM.Int32Ty,
+                                CGM.VoidPtrPtrTy,
+                                CGM.VoidPtrPtrTy,
+                                CGM.SizeTy->getPointerTo(),
+                                CGM.Int64Ty->getPointerTo(),
+                                CGM.VoidPtrPtrTy};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg=*/false);
+    RTLFn =
+        CGM.CreateRuntimeFunction(FnTy, "__tgt_target_data_end_nowait_mapper");
+    break;
+  }
+  case OMPRTL__tgt_target_data_update_mapper: {
+    // Build void __tgt_target_data_update_mapper(int64_t device_id, int32_t
+    // arg_num, void** args_base, void **args, size_t *arg_sizes, int64_t
+    // *arg_types, void **arg_mappers);
+    llvm::Type *TypeParams[] = {CGM.Int64Ty,
+                                CGM.Int32Ty,
+                                CGM.VoidPtrPtrTy,
+                                CGM.VoidPtrPtrTy,
+                                CGM.SizeTy->getPointerTo(),
+                                CGM.Int64Ty->getPointerTo(),
+                                CGM.VoidPtrPtrTy};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_data_update_mapper");
+    break;
+  }
+  case OMPRTL__tgt_target_data_update_nowait_mapper: {
+    // Build void __tgt_target_data_update_nowait_mapper(int64_t device_id,
+    // int32_t arg_num, void** args_base, void **args, size_t *arg_sizes,
+    // int64_t *arg_types, void **arg_mappers);
+    llvm::Type *TypeParams[] = {CGM.Int64Ty,
+                                CGM.Int32Ty,
+                                CGM.VoidPtrPtrTy,
+                                CGM.VoidPtrPtrTy,
+                                CGM.SizeTy->getPointerTo(),
+                                CGM.Int64Ty->getPointerTo(),
+                                CGM.VoidPtrPtrTy};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg=*/false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy,
+                                      "__tgt_target_data_update_nowait_mapper");
     break;
   }
   case OMPRTL__tgt_mapper_num_components: {
