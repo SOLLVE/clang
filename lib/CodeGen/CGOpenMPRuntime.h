@@ -1512,6 +1512,8 @@ public:
     llvm::Value *SizesArray = nullptr;
     /// The array of map types passed to the runtime library.
     llvm::Value *MapTypesArray = nullptr;
+    /// The array of user-defined mappers passed to the runtime library.
+    llvm::Value *MappersArray = nullptr;
     /// The total number of pointers passed to the runtime library.
     unsigned NumberOfPtrs = 0u;
     /// Map between the a declaration of a capture and the corresponding base
@@ -1527,12 +1529,13 @@ public:
       PointersArray = nullptr;
       SizesArray = nullptr;
       MapTypesArray = nullptr;
+      MappersArray = nullptr;
       NumberOfPtrs = 0u;
     }
     /// Return true if the current target data information has valid arrays.
     bool isValid() {
       return BasePointersArray && PointersArray && SizesArray &&
-             MapTypesArray && NumberOfPtrs;
+             MapTypesArray && MappersArray && NumberOfPtrs;
     }
     bool requiresDevicePointerInfo() { return RequiresDevicePointerInfo; }
   };
