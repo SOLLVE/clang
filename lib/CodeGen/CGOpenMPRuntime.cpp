@@ -9512,11 +9512,13 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
                                        InputInfo.PointersArray.getPointer(),
                                        InputInfo.SizesArray.getPointer(),
                                        MapTypesArray,
+                                       InputInfo.MappersArray.getPointer(),
                                        NumTeams,
                                        NumThreads};
       Return = CGF.EmitRuntimeCall(
-          createRuntimeFunction(HasNowait ? OMPRTL__tgt_target_teams_nowait
-                                          : OMPRTL__tgt_target_teams),
+          createRuntimeFunction(HasNowait
+                                    ? OMPRTL__tgt_target_teams_nowait_mapper
+                                    : OMPRTL__tgt_target_teams_mapper),
           OffloadingArgs);
     } else {
       llvm::Value *OffloadingArgs[] = {DeviceID,
@@ -9525,10 +9527,11 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
                                        InputInfo.BasePointersArray.getPointer(),
                                        InputInfo.PointersArray.getPointer(),
                                        InputInfo.SizesArray.getPointer(),
-                                       MapTypesArray};
+                                       MapTypesArray,
+                                       InputInfo.MappersArray.getPointer()};
       Return = CGF.EmitRuntimeCall(
-          createRuntimeFunction(HasNowait ? OMPRTL__tgt_target_nowait
-                                          : OMPRTL__tgt_target),
+          createRuntimeFunction(HasNowait ? OMPRTL__tgt_target_nowait_mapper
+                                          : OMPRTL__tgt_target_mapper),
           OffloadingArgs);
     }
 
@@ -9587,6 +9590,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       MappableExprsHandler::MapFlagsArrayTy CurMapTypes;
       MappableExprsHandler::MapMappersArrayTy CurMappers;
       MappableExprsHandler::StructRangeInfoTy PartialStruct;
+      (*CV)->dump();
 
       // VLA sizes are passed to the outlined region by copy and do not have map
       // information associated.

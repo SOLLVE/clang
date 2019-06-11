@@ -3107,35 +3107,40 @@ void CodeGenFunction::EmitOMPTargetTaskBasedDirective(
   VarDecl *BPVD = nullptr;
   VarDecl *PVD = nullptr;
   VarDecl *SVD = nullptr;
+  VarDecl *MVD = nullptr;
   if (InputInfo.NumberOfTargetItems > 0) {
     auto *CD = CapturedDecl::Create(
         getContext(), getContext().getTranslationUnitDecl(), /*NumParams=*/0);
     llvm::APInt ArrSize(/*numBits=*/32, InputInfo.NumberOfTargetItems);
-    QualType BaseAndPointersType = getContext().getConstantArrayType(
+    QualType BaseAndPointerAndMapperType = getContext().getConstantArrayType(
         getContext().VoidPtrTy, ArrSize, ArrayType::Normal,
         /*IndexTypeQuals=*/0);
     BPVD = createImplicitFirstprivateForType(
-        getContext(), Data, BaseAndPointersType, CD, S.getBeginLoc());
+        getContext(), Data, BaseAndPointerAndMapperType, CD, S.getBeginLoc());
     PVD = createImplicitFirstprivateForType(
-        getContext(), Data, BaseAndPointersType, CD, S.getBeginLoc());
+        getContext(), Data, BaseAndPointerAndMapperType, CD, S.getBeginLoc());
     QualType SizesType = getContext().getConstantArrayType(
         getContext().getSizeType(), ArrSize, ArrayType::Normal,
         /*IndexTypeQuals=*/0);
     SVD = createImplicitFirstprivateForType(getContext(), Data, SizesType, CD,
                                             S.getBeginLoc());
+    MVD = createImplicitFirstprivateForType(
+        getContext(), Data, BaseAndPointerAndMapperType, CD, S.getBeginLoc());
     TargetScope.addPrivate(
         BPVD, [&InputInfo]() { return InputInfo.BasePointersArray; });
     TargetScope.addPrivate(PVD,
                            [&InputInfo]() { return InputInfo.PointersArray; });
     TargetScope.addPrivate(SVD,
                            [&InputInfo]() { return InputInfo.SizesArray; });
+    TargetScope.addPrivate(MVD,
+                           [&InputInfo]() { return InputInfo.MappersArray; });
   }
   (void)TargetScope.Privatize();
   // Build list of dependences.
   for (const auto *C : S.getClausesOfKind<OMPDependClause>())
     for (const Expr *IRef : C->varlists())
       Data.Dependences.emplace_back(C->getDependencyKind(), IRef);
-  auto &&CodeGen = [&Data, &S, CS, &BodyGen, BPVD, PVD, SVD,
+  auto &&CodeGen = [&Data, &S, CS, &BodyGen, BPVD, PVD, SVD, MVD,
                     &InputInfo](CodeGenFunction &CGF, PrePostActionTy &Action) {
     // Set proper addresses for generated private copies.
     OMPPrivateScope Scope(CGF);
@@ -3176,6 +3181,8 @@ void CodeGenFunction::EmitOMPTargetTaskBasedDirective(
           CGF.GetAddrOfLocalVar(PVD), /*Index=*/0);
       InputInfo.SizesArray = CGF.Builder.CreateConstArrayGEP(
           CGF.GetAddrOfLocalVar(SVD), /*Index=*/0);
+      InputInfo.MappersArray = CGF.Builder.CreateConstArrayGEP(
+          CGF.GetAddrOfLocalVar(MVD), /*Index=*/0);
     }
 
     Action.Enter(CGF);
