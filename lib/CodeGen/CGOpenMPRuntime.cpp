@@ -7520,9 +7520,9 @@ private:
       MapValuesArrayTy &Sizes, MapFlagsArrayTy &Types,
       MapMappersArrayTy &Mappers, StructRangeInfoTy &PartialStruct,
       bool IsFirstComponentList, bool IsImplicit,
+      const ValueDecl *Mapper = nullptr,
       ArrayRef<OMPClauseMappableExprCommon::MappableExprComponentListRef>
-          OverlappedElements = llvm::None,
-      const ValueDecl *Mapper = nullptr) const {
+          OverlappedElements = llvm::None) const {
     // The following summarizes what has to be generated for each map and the
     // types below. The generated information is expressed in this order:
     // base pointer, section pointer, size, flags
@@ -8251,8 +8251,7 @@ public:
         this->generateInfoForComponentList(
             L.MapType, L.MapModifiers, L.Components, CurBasePointers,
             CurPointers, CurSizes, CurTypes, CurMappers, PartialStruct,
-            IsFirstComponentList, L.IsImplicit,
-            /*OverlappedElements=*/llvm::None, L.Mapper);
+            IsFirstComponentList, L.IsImplicit, L.Mapper);
 
         // If this entry relates with a device pointer, set the relevant
         // declaration and add the 'return pointer' flag.
@@ -8355,8 +8354,7 @@ public:
         this->generateInfoForComponentList(
             L.MapType, L.MapModifiers, L.Components, CurBasePointers,
             CurPointers, CurSizes, CurTypes, CurMappers, PartialStruct,
-            IsFirstComponentList, L.IsImplicit,
-            /*OverlappedElements=*/llvm::None, L.Mapper);
+            IsFirstComponentList, L.IsImplicit, L.Mapper);
         IsFirstComponentList = false;
       }
 
@@ -8617,7 +8615,7 @@ public:
       generateInfoForComponentList(MapType, MapModifiers, Components,
                                    BasePointers, Pointers, Sizes, Types,
                                    Mappers, PartialStruct, IsFirstComponentList,
-                                   IsImplicit, OverlappedComponents);
+                                   IsImplicit, Mapper, OverlappedComponents);
     }
     // Go through other elements without overlapped elements.
     bool IsFirstComponentList = OverlappedData.empty();
@@ -8630,10 +8628,10 @@ public:
       std::tie(Components, MapType, MapModifiers, IsImplicit, Mapper) = L;
       auto It = OverlappedData.find(&L);
       if (It == OverlappedData.end())
-        generateInfoForComponentList(
-            MapType, MapModifiers, Components, BasePointers, Pointers, Sizes,
-            Types, Mappers, PartialStruct, IsFirstComponentList, IsImplicit,
-            /*OverlappedElements=*/llvm::None, Mapper);
+        generateInfoForComponentList(MapType, MapModifiers, Components,
+                                     BasePointers, Pointers, Sizes, Types,
+                                     Mappers, PartialStruct,
+                                     IsFirstComponentList, IsImplicit, Mapper);
       IsFirstComponentList = false;
     }
   }
@@ -8681,7 +8679,7 @@ public:
                               MapValuesArrayTy &CurPointers,
                               MapValuesArrayTy &CurSizes,
                               MapFlagsArrayTy &CurMapTypes,
-                              MapMappersArrayTy CurMappers) const {
+                              MapMappersArrayTy &CurMappers) const {
     // Do the default mapping.
     if (CI.capturesThis()) {
       CurBasePointers.push_back(CV);
@@ -10331,7 +10329,8 @@ void CGOpenMPRuntime::emitTargetDataStandAloneCall(
                                      InputInfo.BasePointersArray.getPointer(),
                                      InputInfo.PointersArray.getPointer(),
                                      InputInfo.SizesArray.getPointer(),
-                                     MapTypesArray};
+                                     MapTypesArray,
+                                     InputInfo.MappersArray.getPointer()};
 
     // Select the right runtime function call for each standalone
     // directive.
@@ -10339,16 +10338,16 @@ void CGOpenMPRuntime::emitTargetDataStandAloneCall(
     OpenMPRTLFunction RTLFn;
     switch (D.getDirectiveKind()) {
     case OMPD_target_enter_data:
-      RTLFn = HasNowait ? OMPRTL__tgt_target_data_begin_nowait
-                        : OMPRTL__tgt_target_data_begin;
+      RTLFn = HasNowait ? OMPRTL__tgt_target_data_begin_nowait_mapper
+                        : OMPRTL__tgt_target_data_begin_mapper;
       break;
     case OMPD_target_exit_data:
-      RTLFn = HasNowait ? OMPRTL__tgt_target_data_end_nowait
-                        : OMPRTL__tgt_target_data_end;
+      RTLFn = HasNowait ? OMPRTL__tgt_target_data_end_nowait_mapper
+                        : OMPRTL__tgt_target_data_end_mapper;
       break;
     case OMPD_target_update:
-      RTLFn = HasNowait ? OMPRTL__tgt_target_data_update_nowait
-                        : OMPRTL__tgt_target_data_update;
+      RTLFn = HasNowait ? OMPRTL__tgt_target_data_update_nowait_mapper
+                        : OMPRTL__tgt_target_data_update_mapper;
       break;
     case OMPD_parallel:
     case OMPD_for:
