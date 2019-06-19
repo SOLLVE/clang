@@ -8068,7 +8068,7 @@ public:
     // Extract device pointer clause information.
     for (const auto *C : Dir.getClausesOfKind<OMPIsDevicePtrClause>())
       for (auto L : C->component_lists())
-        DevPointersMap[L.first].push_back(L.second);
+        DevPointersMap[std::get<0>(L)].push_back(std::get<1>(L));
   }
 
   /// Constructor for the declare mapper directive.
@@ -8146,42 +8146,23 @@ public:
            "Expect a executable directive");
     const auto *CurExecDir = this->CurDir.get<const OMPExecutableDirective *>();
     for (const auto *C : CurExecDir->getClausesOfKind<OMPMapClause>()) {
-      auto MapperIT = C->mapperlist_begin();
       for (const auto &L : C->component_lists()) {
-        const ValueDecl *Mapper = nullptr;
-        if (*MapperIT)
-          Mapper = cast<ValueDecl>(cast<DeclRefExpr>(*MapperIT)->getDecl());
-        InfoGen(L.first, L.second, C->getMapType(), C->getMapTypeModifiers(),
-                /*ReturnDevicePointer=*/false, C->isImplicit(), Mapper);
-        MapperIT++;
+        InfoGen(std::get<0>(L), std::get<1>(L), C->getMapType(),
+                C->getMapTypeModifiers(), /*ReturnDevicePointer=*/false,
+                C->isImplicit(), std::get<2>(L));
       }
-      assert(MapperIT == C->mapperlist_end() &&
-             "Component and mapper lists are not balanced for a map clause");
     }
     for (const auto *C : CurExecDir->getClausesOfKind<OMPToClause>()) {
-      auto MapperIT = C->mapperlist_begin();
       for (const auto &L : C->component_lists()) {
-        const ValueDecl *Mapper = nullptr;
-        if (*MapperIT)
-          Mapper = cast<ValueDecl>(cast<DeclRefExpr>(*MapperIT)->getDecl());
-        InfoGen(L.first, L.second, OMPC_MAP_to, llvm::None,
-                /*ReturnDevicePointer=*/false, C->isImplicit(), Mapper);
-        MapperIT++;
+        InfoGen(std::get<0>(L), std::get<1>(L), OMPC_MAP_to, llvm::None,
+                /*ReturnDevicePointer=*/false, C->isImplicit(), std::get<2>(L));
       }
-      assert(MapperIT == C->mapperlist_end() &&
-             "Component and mapper lists are not balanced for a map clause");
     }
     for (const auto *C : CurExecDir->getClausesOfKind<OMPFromClause>()) {
-      auto MapperIT = C->mapperlist_begin();
       for (const auto &L : C->component_lists()) {
-        const ValueDecl *Mapper = nullptr;
-        if (*MapperIT)
-          Mapper = cast<ValueDecl>(cast<DeclRefExpr>(*MapperIT)->getDecl());
-        InfoGen(L.first, L.second, OMPC_MAP_from, llvm::None,
-                /*ReturnDevicePointer=*/false, C->isImplicit(), Mapper);
+        InfoGen(std::get<0>(L), std::get<1>(L), OMPC_MAP_from, llvm::None,
+                /*ReturnDevicePointer=*/false, C->isImplicit(), std::get<2>(L));
       }
-      assert(MapperIT == C->mapperlist_end() &&
-             "Component and mapper lists are not balanced for a map clause");
     }
 
     // Look at the use_device_ptr clause information and mark the existing map
@@ -8196,10 +8177,13 @@ public:
     for (const auto *C :
          CurExecDir->getClausesOfKind<OMPUseDevicePtrClause>()) {
       for (const auto &L : C->component_lists()) {
-        assert(!L.second.empty() && "Not expecting empty list of components!");
-        const ValueDecl *VD = L.second.back().getAssociatedDeclaration();
+        OMPClauseMappableExprCommon::MappableExprComponentListRef Components =
+            std::get<1>(L);
+        assert(!Components.empty() &&
+               "Not expecting empty list of components!");
+        const ValueDecl *VD = Components.back().getAssociatedDeclaration();
         VD = cast<ValueDecl>(VD->getCanonicalDecl());
-        const Expr *IE = L.second.back().getAssociatedExpression();
+        const Expr *IE = Components.back().getAssociatedExpression();
         // If the first component is a member expression, we have to look into
         // 'this', which maps to null in the map of map information. Otherwise
         // look directly for the information.
@@ -8232,7 +8216,7 @@ public:
           // Nonetheless, generateInfoForComponentList must be called to take
           // the pointer into account for the calculation of the range of the
           // partial struct.
-          InfoGen(nullptr, L.second, OMPC_MAP_unknown, llvm::None,
+          InfoGen(nullptr, Components, OMPC_MAP_unknown, llvm::None,
                   /*ReturnDevicePointer=*/false, C->isImplicit(), nullptr);
           DeferredInfo[nullptr].emplace_back(IE, VD);
         } else {
@@ -8343,21 +8327,15 @@ public:
     // Fill the information map for map clauses.
     for (const auto *C : CurMapperDir->clauselists()) {
       const auto *MC = cast<const OMPMapClause>(C);
-      auto MapperIT = MC->mapperlist_begin();
       for (const auto &L : MC->component_lists()) {
         const ValueDecl *VD =
-            L.first ? cast<ValueDecl>(L.first->getCanonicalDecl()) : nullptr;
+            std::get<0>(L) ? cast<ValueDecl>(std::get<0>(L)->getCanonicalDecl())
+                           : nullptr;
         // Get the corresponding user-defined mapper.
-        const ValueDecl *Mapper = nullptr;
-        if (*MapperIT)
-          Mapper = cast<ValueDecl>(cast<DeclRefExpr>(*MapperIT)->getDecl());
         Info[VD].emplace_back(
-            L.second, MC->getMapType(), MC->getMapTypeModifiers(),
-            /*ReturnDevicePointer=*/false, MC->isImplicit(), Mapper);
-        MapperIT++;
+            std::get<1>(L), MC->getMapType(), MC->getMapTypeModifiers(),
+            /*ReturnDevicePointer=*/false, MC->isImplicit(), std::get<2>(L));
       }
-      assert(MapperIT == MC->mapperlist_end() &&
-             "Component and mapper lists are not balanced for a map clause");
     }
 
     for (const auto &M : Info) {
@@ -8517,11 +8495,13 @@ public:
     const auto *CurExecDir = this->CurDir.get<const OMPExecutableDirective *>();
     for (const auto *C : CurExecDir->getClausesOfKind<OMPMapClause>()) {
       for (const auto &L : C->decl_component_lists(VD)) {
-        assert(L.first == VD &&
-               "We got information for the wrong declaration??");
-        assert(!L.second.empty() &&
+        const ValueDecl *VDecl, *Mapper;
+        OMPClauseMappableExprCommon::MappableExprComponentListRef Components;
+        std::tie(VDecl, Components, Mapper) = L;
+        assert(VDecl == VD && "We got information for the wrong declaration??");
+        assert(!Components.empty() &&
                "Not expecting declaration with no component lists.");
-        DeclComponentLists.emplace_back(L.second, C->getMapType(),
+        DeclComponentLists.emplace_back(Components, C->getMapType(),
                                         C->getMapTypeModifiers(),
                                         C->isImplicit());
       }
@@ -8652,6 +8632,7 @@ public:
         generateInfoForComponentList(
             MapType, MapModifiers, Components, BasePointers, Pointers, Sizes,
             Types, Mappers, PartialStruct, IsFirstComponentList, IsImplicit);
+            ///*OverlappedElements=*/llvm::None, L.Mapper);
       IsFirstComponentList = false;
     }
   }
@@ -8671,9 +8652,9 @@ public:
     // but "declare target link" global variables.
     for (const auto *C : CurExecDir->getClausesOfKind<OMPMapClause>()) {
       for (const auto &L : C->component_lists()) {
-        if (!L.first)
+        if (!std::get<0>(L))
           continue;
-        const auto *VD = dyn_cast<VarDecl>(L.first);
+        const auto *VD = dyn_cast<VarDecl>(std::get<0>(L));
         if (!VD)
           continue;
         llvm::Optional<OMPDeclareTargetDeclAttr::MapTypeTy> Res =
@@ -8682,8 +8663,8 @@ public:
           continue;
         StructRangeInfoTy PartialStruct;
         generateInfoForComponentList(
-            C->getMapType(), C->getMapTypeModifiers(), L.second, BasePointers,
-            Pointers, Sizes, Types, Mappers, PartialStruct,
+            C->getMapType(), C->getMapTypeModifiers(), std::get<1>(L),
+            BasePointers, Pointers, Sizes, Types, Mappers, PartialStruct,
             /*IsFirstComponentList=*/true, C->isImplicit());
         assert(!PartialStruct.Base.isValid() &&
                "No partial structs for declare target link expected.");
