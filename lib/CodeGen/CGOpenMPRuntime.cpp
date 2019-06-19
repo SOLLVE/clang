@@ -8145,25 +8145,22 @@ public:
     assert(this->CurDir.is<const OMPExecutableDirective *>() &&
            "Expect a executable directive");
     const auto *CurExecDir = this->CurDir.get<const OMPExecutableDirective *>();
-    for (const auto *C : CurExecDir->getClausesOfKind<OMPMapClause>()) {
+    for (const auto *C : CurExecDir->getClausesOfKind<OMPMapClause>())
       for (const auto &L : C->component_lists()) {
         InfoGen(std::get<0>(L), std::get<1>(L), C->getMapType(),
                 C->getMapTypeModifiers(), /*ReturnDevicePointer=*/false,
                 C->isImplicit(), std::get<2>(L));
       }
-    }
-    for (const auto *C : CurExecDir->getClausesOfKind<OMPToClause>()) {
+    for (const auto *C : CurExecDir->getClausesOfKind<OMPToClause>())
       for (const auto &L : C->component_lists()) {
         InfoGen(std::get<0>(L), std::get<1>(L), OMPC_MAP_to, llvm::None,
                 /*ReturnDevicePointer=*/false, C->isImplicit(), std::get<2>(L));
       }
-    }
-    for (const auto *C : CurExecDir->getClausesOfKind<OMPFromClause>()) {
+    for (const auto *C : CurExecDir->getClausesOfKind<OMPFromClause>())
       for (const auto &L : C->component_lists()) {
         InfoGen(std::get<0>(L), std::get<1>(L), OMPC_MAP_from, llvm::None,
                 /*ReturnDevicePointer=*/false, C->isImplicit(), std::get<2>(L));
       }
-    }
 
     // Look at the use_device_ptr clause information and mark the existing map
     // entries as such. If there is no map information for an entry in the
@@ -8487,7 +8484,8 @@ public:
 
     using MapData =
         std::tuple<OMPClauseMappableExprCommon::MappableExprComponentListRef,
-                   OpenMPMapClauseKind, ArrayRef<OpenMPMapModifierKind>, bool>;
+                   OpenMPMapClauseKind, ArrayRef<OpenMPMapModifierKind>, bool,
+                   const ValueDecl *>;
     SmallVector<MapData, 4> DeclComponentLists;
     // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
     assert(this->CurDir.is<const OMPExecutableDirective *>() &&
@@ -8503,7 +8501,7 @@ public:
                "Not expecting declaration with no component lists.");
         DeclComponentLists.emplace_back(Components, C->getMapType(),
                                         C->getMapTypeModifiers(),
-                                        C->isImplicit());
+                                        C->isImplicit(), Mapper);
       }
     }
 
@@ -8520,11 +8518,12 @@ public:
       OpenMPMapClauseKind MapType;
       ArrayRef<OpenMPMapModifierKind> MapModifiers;
       bool IsImplicit;
-      std::tie(Components, MapType, MapModifiers, IsImplicit) = L;
+      const ValueDecl *Mapper;
+      std::tie(Components, MapType, MapModifiers, IsImplicit, Mapper) = L;
       ++Count;
       for (const MapData &L1 : makeArrayRef(DeclComponentLists).slice(Count)) {
         OMPClauseMappableExprCommon::MappableExprComponentListRef Components1;
-        std::tie(Components1, MapType, MapModifiers, IsImplicit) = L1;
+        std::tie(Components1, MapType, MapModifiers, IsImplicit, Mapper) = L1;
         auto CI = Components.rbegin();
         auto CE = Components.rend();
         auto SI = Components1.rbegin();
@@ -8610,7 +8609,8 @@ public:
       OpenMPMapClauseKind MapType;
       ArrayRef<OpenMPMapModifierKind> MapModifiers;
       bool IsImplicit;
-      std::tie(Components, MapType, MapModifiers, IsImplicit) = L;
+      const ValueDecl *Mapper;
+      std::tie(Components, MapType, MapModifiers, IsImplicit, Mapper) = L;
       ArrayRef<OMPClauseMappableExprCommon::MappableExprComponentListRef>
           OverlappedComponents = Pair.getSecond();
       bool IsFirstComponentList = true;
@@ -8626,13 +8626,14 @@ public:
       OpenMPMapClauseKind MapType;
       ArrayRef<OpenMPMapModifierKind> MapModifiers;
       bool IsImplicit;
-      std::tie(Components, MapType, MapModifiers, IsImplicit) = L;
+      const ValueDecl *Mapper;
+      std::tie(Components, MapType, MapModifiers, IsImplicit, Mapper) = L;
       auto It = OverlappedData.find(&L);
       if (It == OverlappedData.end())
         generateInfoForComponentList(
             MapType, MapModifiers, Components, BasePointers, Pointers, Sizes,
-            Types, Mappers, PartialStruct, IsFirstComponentList, IsImplicit);
-            ///*OverlappedElements=*/llvm::None, L.Mapper);
+            Types, Mappers, PartialStruct, IsFirstComponentList, IsImplicit,
+            /*OverlappedElements=*/llvm::None, Mapper);
       IsFirstComponentList = false;
     }
   }
