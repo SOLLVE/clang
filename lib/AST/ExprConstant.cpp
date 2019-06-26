@@ -47,6 +47,7 @@
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/FixedPoint.h"
 #include "clang/Basic/TargetInfo.h"
+#include "llvm/ADT/SmallBitVector.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstring>
@@ -2387,9 +2388,11 @@ static bool handleIntIntBinOp(EvalInfo &Info, const Expr *E, const APSInt &LHS,
     if (SA != RHS) {
       Info.CCEDiag(E, diag::note_constexpr_large_shift)
         << RHS << E->getType() << LHS.getBitWidth();
-    } else if (LHS.isSigned()) {
+    } else if (LHS.isSigned() && !Info.getLangOpts().CPlusPlus2a) {
       // C++11 [expr.shift]p2: A signed left shift must have a non-negative
       // operand, and must not overflow the corresponding unsigned type.
+      // C++2a [expr.shift]p2: E1 << E2 is the unique value congruent to
+      // E1 x 2^E2 module 2^N.
       if (LHS.isNegative())
         Info.CCEDiag(E, diag::note_constexpr_lshift_of_negative) << LHS;
       else if (LHS.countLeadingZeros() < SA)
@@ -5091,14 +5094,37 @@ typedef SmallVector<APValue, 8> ArgVector;
 }
 
 /// EvaluateArgs - Evaluate the arguments to a function call.
-static bool EvaluateArgs(ArrayRef<const Expr*> Args, ArgVector &ArgValues,
-                         EvalInfo &Info) {
+static bool EvaluateArgs(ArrayRef<const Expr *> Args, ArgVector &ArgValues,
+                         EvalInfo &Info, const FunctionDecl *Callee) {
   bool Success = true;
+  llvm::SmallBitVector ForbiddenNullArgs;
+  if (Callee->hasAttr<NonNullAttr>()) {
+    ForbiddenNullArgs.resize(Args.size());
+    for (const auto *Attr : Callee->specific_attrs<NonNullAttr>()) {
+      if (!Attr->args_size()) {
+        ForbiddenNullArgs.set();
+        break;
+      } else
+        for (auto Idx : Attr->args()) {
+          unsigned ASTIdx = Idx.getASTIndex();
+          if (ASTIdx >= Args.size())
+            continue;
+          ForbiddenNullArgs[ASTIdx] = 1;
+        }
+    }
+  }
   for (ArrayRef<const Expr*>::iterator I = Args.begin(), E = Args.end();
        I != E; ++I) {
     if (!Evaluate(ArgValues[I - Args.begin()], Info, *I)) {
       // If we're checking for a potential constant expression, evaluate all
       // initializers even if some of them fail.
+      if (!Info.noteFailure())
+        return false;
+      Success = false;
+    } else if (!ForbiddenNullArgs.empty() &&
+               ForbiddenNullArgs[I - Args.begin()] &&
+               ArgValues[I - Args.begin()].isNullPointer()) {
+      Info.CCEDiag(*I, diag::note_non_null_attribute_failed);
       if (!Info.noteFailure())
         return false;
       Success = false;
@@ -5114,7 +5140,7 @@ static bool HandleFunctionCall(SourceLocation CallLoc,
                                EvalInfo &Info, APValue &Result,
                                const LValue *ResultSlot) {
   ArgVector ArgValues(Args.size());
-  if (!EvaluateArgs(Args, ArgValues, Info))
+  if (!EvaluateArgs(Args, ArgValues, Info, Callee))
     return false;
 
   if (!Info.CheckCallLimit(CallLoc))
@@ -5338,7 +5364,7 @@ static bool HandleConstructorCall(const Expr *E, const LValue &This,
                                   const CXXConstructorDecl *Definition,
                                   EvalInfo &Info, APValue &Result) {
   ArgVector ArgValues(Args.size());
-  if (!EvaluateArgs(Args, ArgValues, Info))
+  if (!EvaluateArgs(Args, ArgValues, Info, Definition))
     return false;
 
   return HandleConstructorCall(E, This, ArgValues.data(), Definition,
@@ -8939,6 +8965,8 @@ static bool tryEvaluateBuiltinObjectSize(const Expr *E, unsigned Type,
 
 bool IntExprEvaluator::VisitConstantExpr(const ConstantExpr *E) {
   llvm::SaveAndRestore<bool> InConstantContext(Info.InConstantContext, true);
+  if (E->getResultAPValueKind() != APValue::None)
+    return Success(E->getAPValueResult(), E);
   return ExprEvaluatorBaseTy::VisitConstantExpr(E);
 }
 
@@ -11855,33 +11883,38 @@ bool Expr::EvaluateAsRValue(EvalResult &Result, const ASTContext &Ctx,
   return ::EvaluateAsRValue(this, Result, Ctx, Info);
 }
 
-bool Expr::EvaluateAsBooleanCondition(bool &Result,
-                                      const ASTContext &Ctx) const {
+bool Expr::EvaluateAsBooleanCondition(bool &Result, const ASTContext &Ctx,
+                                      bool InConstantContext) const {
   assert(!isValueDependent() &&
          "Expression evaluator can't be called on a dependent expression.");
   EvalResult Scratch;
-  return EvaluateAsRValue(Scratch, Ctx) &&
+  return EvaluateAsRValue(Scratch, Ctx, InConstantContext) &&
          HandleConversionToBool(Scratch.Val, Result);
 }
 
 bool Expr::EvaluateAsInt(EvalResult &Result, const ASTContext &Ctx,
-                         SideEffectsKind AllowSideEffects) const {
+                         SideEffectsKind AllowSideEffects,
+                         bool InConstantContext) const {
   assert(!isValueDependent() &&
          "Expression evaluator can't be called on a dependent expression.");
   EvalInfo Info(Ctx, Result, EvalInfo::EM_IgnoreSideEffects);
+  Info.InConstantContext = InConstantContext;
   return ::EvaluateAsInt(this, Result, Ctx, AllowSideEffects, Info);
 }
 
 bool Expr::EvaluateAsFixedPoint(EvalResult &Result, const ASTContext &Ctx,
-                                SideEffectsKind AllowSideEffects) const {
+                                SideEffectsKind AllowSideEffects,
+                                bool InConstantContext) const {
   assert(!isValueDependent() &&
          "Expression evaluator can't be called on a dependent expression.");
   EvalInfo Info(Ctx, Result, EvalInfo::EM_IgnoreSideEffects);
+  Info.InConstantContext = InConstantContext;
   return ::EvaluateAsFixedPoint(this, Result, Ctx, AllowSideEffects, Info);
 }
 
 bool Expr::EvaluateAsFloat(APFloat &Result, const ASTContext &Ctx,
-                           SideEffectsKind AllowSideEffects) const {
+                           SideEffectsKind AllowSideEffects,
+                           bool InConstantContext) const {
   assert(!isValueDependent() &&
          "Expression evaluator can't be called on a dependent expression.");
 
@@ -11889,7 +11922,8 @@ bool Expr::EvaluateAsFloat(APFloat &Result, const ASTContext &Ctx,
     return false;
 
   EvalResult ExprResult;
-  if (!EvaluateAsRValue(ExprResult, Ctx) || !ExprResult.Val.isFloat() ||
+  if (!EvaluateAsRValue(ExprResult, Ctx, InConstantContext) ||
+      !ExprResult.Val.isFloat() ||
       hasUnacceptableSideEffect(ExprResult, AllowSideEffects))
     return false;
 
@@ -11897,12 +11931,13 @@ bool Expr::EvaluateAsFloat(APFloat &Result, const ASTContext &Ctx,
   return true;
 }
 
-bool Expr::EvaluateAsLValue(EvalResult &Result, const ASTContext &Ctx) const {
+bool Expr::EvaluateAsLValue(EvalResult &Result, const ASTContext &Ctx,
+                            bool InConstantContext) const {
   assert(!isValueDependent() &&
          "Expression evaluator can't be called on a dependent expression.");
 
   EvalInfo Info(Ctx, Result, EvalInfo::EM_ConstantFold);
-
+  Info.InConstantContext = InConstantContext;
   LValue LV;
   if (!EvaluateLValue(this, LV, Info) || Result.HasSideEffects ||
       !CheckLValueConstantExpression(Info, getExprLoc(),
@@ -12685,7 +12720,7 @@ bool Expr::isPotentialConstantExprUnevaluated(Expr *E,
   // Fabricate a call stack frame to give the arguments a plausible cover story.
   ArrayRef<const Expr*> Args;
   ArgVector ArgValues(0);
-  bool Success = EvaluateArgs(Args, ArgValues, Info);
+  bool Success = EvaluateArgs(Args, ArgValues, Info, FD);
   (void)Success;
   assert(Success &&
          "Failed to set up arguments for potential constant evaluation");
