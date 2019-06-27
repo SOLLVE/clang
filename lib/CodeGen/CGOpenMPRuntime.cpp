@@ -755,7 +755,7 @@ enum OpenMPRTLFunction {
   // Call to int64_t __tgt_mapper_num_components(void *rt_mapper_handle);
   OMPRTL__tgt_mapper_num_components,
   // Call to void __tgt_push_mapper_component(void *rt_mapper_handle, void
-  // *base, void *begin, size_t size, int64_t type);
+  // *base, void *begin, int64_t size, int64_t type);
   OMPRTL__tgt_push_mapper_component,
 };
 
@@ -2479,9 +2479,9 @@ llvm::FunctionCallee CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
   }
   case OMPRTL__tgt_push_mapper_component: {
     // Build void __tgt_push_mapper_component(void *rt_mapper_handle, void
-    // *base, void *begin, size_t size, int64_t type);
+    // *base, void *begin, int64_t size, int64_t type);
     llvm::Type *TypeParams[] = {CGM.VoidPtrTy, CGM.VoidPtrTy, CGM.VoidPtrTy,
-                                CGM.SizeTy, CGM.Int64Ty};
+                                CGM.Int64Ty, CGM.Int64Ty};
     auto *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_push_mapper_component");
@@ -8804,7 +8804,7 @@ getNestedDistributeDirective(ASTContext &Ctx, const OMPExecutableDirective &D) {
 /// \code
 /// void .omp_mapper.<type_name>.<mapper_id>.(void *rt_mapper_handle,
 ///                                           void *base, void *begin,
-///                                           size_t size, int64_t type) {
+///                                           int64_t size, int64_t type) {
 ///   // Allocate space for an array section first.
 ///   if (size > 1 && !maptype.IsDelete)
 ///     __tgt_push_mapper_component(rt_mapper_handle, base, begin,
@@ -8834,7 +8834,6 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
   ASTContext &C = CGM.getContext();
   QualType Ty = D->getType();
   QualType PtrTy = C.getPointerType(Ty).withRestrict();
-  QualType SizeTy = C.getSizeType();
   QualType Int64Ty = C.getIntTypeForBitwidth(/*DestWidth=*/64, /*Signed=*/true);
   auto *MapperVarDecl =
       cast<VarDecl>(cast<DeclRefExpr>(D->getMapperVarRef())->getDecl());
@@ -8848,7 +8847,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
                             ImplicitParamDecl::Other);
   ImplicitParamDecl BeginArg(C, /*DC=*/nullptr, Loc, /*Id=*/nullptr,
                              C.VoidPtrTy, ImplicitParamDecl::Other);
-  ImplicitParamDecl SizeArg(C, /*DC=*/nullptr, Loc, /*Id=*/nullptr, SizeTy,
+  ImplicitParamDecl SizeArg(C, /*DC=*/nullptr, Loc, /*Id=*/nullptr, Int64Ty,
                             ImplicitParamDecl::Other);
   ImplicitParamDecl TypeArg(C, /*DC=*/nullptr, Loc, /*Id=*/nullptr, Int64Ty,
                             ImplicitParamDecl::Other);
@@ -8875,7 +8874,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
   // Compute the starting and end addreses of array elements.
   llvm::Value *Size = MapperCGF.EmitLoadOfScalar(
       MapperCGF.GetAddrOfLocalVar(&SizeArg), /*Volatile=*/false,
-      C.getPointerType(SizeTy), Loc);
+      C.getPointerType(Int64Ty), Loc);
   llvm::Value *PtrBegin = MapperCGF.Builder.CreateBitCast(
       MapperCGF.GetAddrOfLocalVar(&BeginArg).getPointer(),
       CGM.getTypes().ConvertTypeForMem(C.getPointerType(PtrTy)));
@@ -9088,7 +9087,6 @@ void CGOpenMPRuntime::emitUDMapperArrayInitOrDel(
     CodeGenFunction &MapperCGF, llvm::Value *Handle, llvm::Value *Base,
     llvm::Value *Begin, llvm::Value *Size, llvm::Value *MapType,
     CharUnits ElementSize, llvm::BasicBlock *ExitBB, bool IsInit) {
-  ASTContext &C = CGM.getContext();
   StringRef Prefix = IsInit ? ".init" : ".del";
 
   // Evaluate if this is an array section.
@@ -9096,8 +9094,7 @@ void CGOpenMPRuntime::emitUDMapperArrayInitOrDel(
       MapperCGF.createBasicBlock("omp.array" + Prefix + ".evaldelete");
   llvm::BasicBlock *BodyBB = MapperCGF.createBasicBlock("omp.array" + Prefix);
   llvm::Value *IsArray = MapperCGF.Builder.CreateICmpSGE(
-      Size, MapperCGF.Builder.getIntN(C.toBits(CGM.getSizeSize()), 1),
-      "omp.arrayinit.isarray");
+      Size, MapperCGF.Builder.getInt64(1), "omp.arrayinit.isarray");
   MapperCGF.Builder.CreateCondBr(IsArray, IsDeleteBB, ExitBB);
 
   // Evaluate if we are going to delete this section.
@@ -9119,8 +9116,7 @@ void CGOpenMPRuntime::emitUDMapperArrayInitOrDel(
   // Get the array size by multiplying element size and element number (i.e., \p
   // Size).
   llvm::Value *ArraySize = MapperCGF.Builder.CreateNUWMul(
-      Size, MapperCGF.Builder.getIntN(C.toBits(CGM.getSizeSize()),
-                                      ElementSize.getQuantity()));
+      Size, MapperCGF.Builder.getInt64(ElementSize.getQuantity()));
   // Remove OMP_MAP_TO and OMP_MAP_FROM from the map type, so that it achieves
   // memory allocation/deletion purpose only.
   llvm::Value *MapTypeArg = MapperCGF.Builder.CreateAnd(
