@@ -2396,6 +2396,8 @@ public:
 
   bool doesDeclarationForceExternallyVisibleDefinition() const;
 
+  bool isStatic() const { return getStorageClass() == SC_Static; }
+
   /// Whether this function declaration represents an C++ overloaded
   /// operator, e.g., "operator+".
   bool isOverloadedOperator() const {
@@ -3742,6 +3744,30 @@ public:
 
   void setNonTrivialToPrimitiveDestroy(bool V) {
     RecordDeclBits.NonTrivialToPrimitiveDestroy = V;
+  }
+
+  bool hasNonTrivialToPrimitiveDefaultInitializeCUnion() const {
+    return RecordDeclBits.HasNonTrivialToPrimitiveDefaultInitializeCUnion;
+  }
+
+  void setHasNonTrivialToPrimitiveDefaultInitializeCUnion(bool V) {
+    RecordDeclBits.HasNonTrivialToPrimitiveDefaultInitializeCUnion = V;
+  }
+
+  bool hasNonTrivialToPrimitiveDestructCUnion() const {
+    return RecordDeclBits.HasNonTrivialToPrimitiveDestructCUnion;
+  }
+
+  void setHasNonTrivialToPrimitiveDestructCUnion(bool V) {
+    RecordDeclBits.HasNonTrivialToPrimitiveDestructCUnion = V;
+  }
+
+  bool hasNonTrivialToPrimitiveCopyCUnion() const {
+    return RecordDeclBits.HasNonTrivialToPrimitiveCopyCUnion;
+  }
+
+  void setHasNonTrivialToPrimitiveCopyCUnion(bool V) {
+    RecordDeclBits.HasNonTrivialToPrimitiveCopyCUnion = V;
   }
 
   /// Determine whether this class can be passed in registers. In C++ mode,

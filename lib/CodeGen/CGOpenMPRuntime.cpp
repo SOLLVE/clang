@@ -2926,7 +2926,7 @@ Address CGOpenMPRuntime::getAddrOfArtificialThreadPrivate(CodeGenFunction &CGF,
       getThreadID(CGF, SourceLocation()),
       CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(GAddr, CGM.VoidPtrTy),
       CGF.Builder.CreateIntCast(CGF.getTypeSize(VarType), CGM.SizeTy,
-                                /*IsSigned=*/false),
+                                /*isSigned=*/false),
       getOrCreateInternalVariable(
           CGM.VoidPtrPtrTy, Twine(Name).concat(Suffix).concat(CacheSuffix))};
   return Address(
@@ -5282,7 +5282,7 @@ void CGOpenMPRuntime::emitTaskCall(CodeGenFunction &CGF, SourceLocation Loc,
       if (const auto *ASE =
               dyn_cast<OMPArraySectionExpr>(E->IgnoreParenImpCasts())) {
         LValue UpAddrLVal =
-            CGF.EmitOMPArraySectionExpr(ASE, /*LowerBound=*/false);
+            CGF.EmitOMPArraySectionExpr(ASE, /*IsLowerBound=*/false);
         llvm::Value *UpAddr =
             CGF.Builder.CreateConstGEP1_32(UpAddrLVal.getPointer(), /*Idx0=*/1);
         llvm::Value *LowIntPtr =
@@ -6321,7 +6321,7 @@ llvm::Value *CGOpenMPRuntime::emitTaskReductionInit(
     LValue FlagsLVal = CGF.EmitLValueForField(ElemLVal, FlagsFD);
     if (DelayedCreation) {
       CGF.EmitStoreOfScalar(
-          llvm::ConstantInt::get(CGM.Int32Ty, /*V=*/1, /*IsSigned=*/true),
+          llvm::ConstantInt::get(CGM.Int32Ty, /*V=*/1, /*isSigned=*/true),
           FlagsLVal);
     } else
       CGF.EmitNullInitialization(FlagsLVal.getAddress(), FlagsLVal.getType());
@@ -6677,7 +6677,7 @@ emitNumTeamsForTargetDirective(CodeGenFunction &CGF,
               CGF.EmitScalarExpr(NumTeams,
                                  /*IgnoreResultAssign*/ true);
           return Bld.CreateIntCast(NumTeamsVal, CGF.Int32Ty,
-                                   /*IsSigned=*/true);
+                                   /*isSigned=*/true);
         }
         return Bld.getInt32(0);
       }
@@ -6701,7 +6701,7 @@ emitNumTeamsForTargetDirective(CodeGenFunction &CGF,
           CGF.EmitScalarExpr(NumTeams,
                              /*IgnoreResultAssign*/ true);
       return Bld.CreateIntCast(NumTeamsVal, CGF.Int32Ty,
-                               /*IsSigned=*/true);
+                               /*isSigned=*/true);
     }
     return Bld.getInt32(0);
   }
@@ -6829,7 +6829,7 @@ static llvm::Value *getNumThreads(CodeGenFunction &CGF, const CapturedStmt *CS,
         }
         NumThreads = CGF.EmitScalarExpr(NumThreadsClause->getNumThreads());
         NumThreads = CGF.Builder.CreateIntCast(NumThreads, CGF.Int32Ty,
-                                               /*IsSigned=*/false);
+                                               /*isSigned=*/false);
         if (DefaultThreadLimitVal)
           NumThreads = CGF.Builder.CreateSelect(
               CGF.Builder.CreateICmpULT(DefaultThreadLimitVal, NumThreads),
@@ -6903,7 +6903,7 @@ emitNumThreadsForTargetDirective(CodeGenFunction &CGF,
         llvm::Value *ThreadLimit = CGF.EmitScalarExpr(
             ThreadLimitClause->getThreadLimit(), /*IgnoreResultAssign=*/true);
         ThreadLimitVal =
-            Bld.CreateIntCast(ThreadLimit, CGF.Int32Ty, /*IsSigned=*/false);
+            Bld.CreateIntCast(ThreadLimit, CGF.Int32Ty, /*isSigned=*/false);
       }
       if (isOpenMPTeamsDirective(Dir->getDirectiveKind()) &&
           !isOpenMPDistributeDirective(Dir->getDirectiveKind())) {
@@ -6930,7 +6930,7 @@ emitNumThreadsForTargetDirective(CodeGenFunction &CGF,
       llvm::Value *ThreadLimit = CGF.EmitScalarExpr(
           ThreadLimitClause->getThreadLimit(), /*IgnoreResultAssign=*/true);
       ThreadLimitVal =
-          Bld.CreateIntCast(ThreadLimit, CGF.Int32Ty, /*IsSigned=*/false);
+          Bld.CreateIntCast(ThreadLimit, CGF.Int32Ty, /*isSigned=*/false);
     }
     const CapturedStmt *CS = D.getInnermostCapturedStmt();
     if (llvm::Value *NumThreads = getNumThreads(CGF, CS, ThreadLimitVal))
@@ -6953,7 +6953,7 @@ emitNumThreadsForTargetDirective(CodeGenFunction &CGF,
       llvm::Value *ThreadLimit = CGF.EmitScalarExpr(
           ThreadLimitClause->getThreadLimit(), /*IgnoreResultAssign=*/true);
       ThreadLimitVal =
-          Bld.CreateIntCast(ThreadLimit, CGF.Int32Ty, /*IsSigned=*/false);
+          Bld.CreateIntCast(ThreadLimit, CGF.Int32Ty, /*isSigned=*/false);
     }
     return getNumThreads(CGF, D.getInnermostCapturedStmt(), ThreadLimitVal);
   case OMPD_target_parallel:
@@ -6991,7 +6991,7 @@ emitNumThreadsForTargetDirective(CodeGenFunction &CGF,
       llvm::Value *ThreadLimit = CGF.EmitScalarExpr(
           ThreadLimitClause->getThreadLimit(), /*IgnoreResultAssign=*/true);
       ThreadLimitVal =
-          Bld.CreateIntCast(ThreadLimit, CGF.Int32Ty, /*IsSigned=*/false);
+          Bld.CreateIntCast(ThreadLimit, CGF.Int32Ty, /*isSigned=*/false);
     }
     if (D.hasClausesOfKind<OMPNumThreadsClause>()) {
       CodeGenFunction::RunCleanupsScope NumThreadsScope(CGF);
@@ -6999,7 +6999,7 @@ emitNumThreadsForTargetDirective(CodeGenFunction &CGF,
       llvm::Value *NumThreads = CGF.EmitScalarExpr(
           NumThreadsClause->getNumThreads(), /*IgnoreResultAssign=*/true);
       NumThreadsVal =
-          Bld.CreateIntCast(NumThreads, CGF.Int32Ty, /*IsSigned=*/false);
+          Bld.CreateIntCast(NumThreads, CGF.Int32Ty, /*isSigned=*/false);
       ThreadLimitVal = ThreadLimitVal
                            ? Bld.CreateSelect(Bld.CreateICmpULT(NumThreadsVal,
                                                                 ThreadLimitVal),
@@ -7195,7 +7195,9 @@ private:
   CodeGenFunction &CGF;
 
   /// Set of all first private variables in the current directive.
-  llvm::SmallPtrSet<const VarDecl *, 8> FirstPrivateDecls;
+  /// bool data is set to true if the variable is implicitly marked as
+  /// firstprivate, false otherwise.
+  llvm::DenseMap<CanonicalDeclPtr<const VarDecl>, bool> FirstPrivateDecls;
 
   /// Map between device pointer declarations and their expression components.
   /// The key value for declarations in 'this' is null.
@@ -7876,8 +7878,8 @@ public:
     // Extract firstprivate clause information.
     for (const auto *C : Dir.getClausesOfKind<OMPFirstprivateClause>())
       for (const auto *D : C->varlists())
-        FirstPrivateDecls.insert(
-            cast<VarDecl>(cast<DeclRefExpr>(D)->getDecl())->getCanonicalDecl());
+        FirstPrivateDecls.try_emplace(
+            cast<VarDecl>(cast<DeclRefExpr>(D)->getDecl()), C->isImplicit());
     // Extract device pointer clause information.
     for (const auto *C : Dir.getClausesOfKind<OMPIsDevicePtrClause>())
       for (auto L : C->component_lists())
@@ -7907,7 +7909,7 @@ public:
     llvm::Value *CHAddr = CGF.Builder.CreatePointerCast(HAddr, CGF.VoidPtrTy);
     llvm::Value *Diff = CGF.Builder.CreatePtrDiff(CHAddr, CLAddr);
     llvm::Value *Size = CGF.Builder.CreateIntCast(Diff, CGF.Int64Ty,
-                                                  /*isSinged=*/false);
+                                                  /*isSigned=*/false);
     Sizes.push_back(Size);
     // Map type is always TARGET_PARAM
     Types.push_back(OMP_MAP_TARGET_PARAM);
@@ -8211,20 +8213,30 @@ public:
                       OMP_MAP_MEMBER_OF | OMP_MAP_IMPLICIT);
     }
     for (const LambdaCapture &LC : RD->captures()) {
-      if (LC.getCaptureKind() != LCK_ByRef)
+      if (!LC.capturesVariable())
         continue;
       const VarDecl *VD = LC.getCapturedVar();
+      if (LC.getCaptureKind() != LCK_ByRef && !VD->getType()->isPointerType())
+        continue;
       auto It = Captures.find(VD);
       assert(It != Captures.end() && "Found lambda capture without field.");
       LValue VarLVal = CGF.EmitLValueForFieldInitialization(VDLVal, It->second);
-      LValue VarLValVal = CGF.EmitLValueForField(VDLVal, It->second);
-      LambdaPointers.try_emplace(VarLVal.getPointer(), VDLVal.getPointer());
-      BasePointers.push_back(VarLVal.getPointer());
-      Pointers.push_back(VarLValVal.getPointer());
-      Sizes.push_back(CGF.Builder.CreateIntCast(
-          CGF.getTypeSize(
-              VD->getType().getCanonicalType().getNonReferenceType()),
-          CGF.Int64Ty, /*isSigned=*/true));
+      if (LC.getCaptureKind() == LCK_ByRef) {
+        LValue VarLValVal = CGF.EmitLValueForField(VDLVal, It->second);
+        LambdaPointers.try_emplace(VarLVal.getPointer(), VDLVal.getPointer());
+        BasePointers.push_back(VarLVal.getPointer());
+        Pointers.push_back(VarLValVal.getPointer());
+        Sizes.push_back(CGF.Builder.CreateIntCast(
+            CGF.getTypeSize(
+                VD->getType().getCanonicalType().getNonReferenceType()),
+            CGF.Int64Ty, /*isSigned=*/true));
+      } else {
+        RValue VarRVal = CGF.EmitLoadOfLValue(VarLVal, RD->getLocation());
+        LambdaPointers.try_emplace(VarLVal.getPointer(), VDLVal.getPointer());
+        BasePointers.push_back(VarLVal.getPointer());
+        Pointers.push_back(VarRVal.getScalarVal());
+        Sizes.push_back(llvm::ConstantInt::get(CGF.Int64Ty, 0));
+      }
       Types.push_back(OMP_MAP_PTR_AND_OBJ | OMP_MAP_LITERAL |
                       OMP_MAP_MEMBER_OF | OMP_MAP_IMPLICIT);
     }
@@ -8481,6 +8493,7 @@ public:
                               MapValuesArrayTy &CurPointers,
                               MapValuesArrayTy &CurSizes,
                               MapFlagsArrayTy &CurMapTypes) const {
+    bool IsImplicit = true;
     // Do the default mapping.
     if (CI.capturesThis()) {
       CurBasePointers.push_back(CV);
@@ -8506,6 +8519,10 @@ public:
         CurMapTypes.push_back(OMP_MAP_NONE);
         CurSizes.push_back(llvm::Constant::getNullValue(CGF.Int64Ty));
       }
+      const VarDecl *VD = CI.getCapturedVar();
+      auto I = FirstPrivateDecls.find(VD);
+      if (I != FirstPrivateDecls.end())
+        IsImplicit = I->getSecond();
     } else {
       assert(CI.capturesVariable() && "Expected captured reference.");
       const auto *PtrTy = cast<ReferenceType>(RI.getType().getTypePtr());
@@ -8517,7 +8534,8 @@ public:
       // type, the default is 'tofrom'.
       CurMapTypes.push_back(getMapModifiersForPrivateClauses(CI));
       const VarDecl *VD = CI.getCapturedVar();
-      if (FirstPrivateDecls.count(VD) &&
+      auto I = FirstPrivateDecls.find(VD);
+      if (I != FirstPrivateDecls.end() &&
           VD->getType().isConstant(CGF.getContext())) {
         llvm::Constant *Addr =
             CGF.CGM.getOpenMPRuntime().registerTargetFirstprivateCopy(CGF, VD);
@@ -8525,13 +8543,13 @@ public:
         CGF.Builder.CreateMemCpy(
             CGF.MakeNaturalAlignAddrLValue(Addr, ElementType).getAddress(),
             Address(CV, CGF.getContext().getTypeAlignInChars(ElementType)),
-            CurSizes.back(), /*isVolatile=*/false);
+            CurSizes.back(), /*IsVolatile=*/false);
         // Use new global variable as the base pointers.
         CurBasePointers.push_back(Addr);
         CurPointers.push_back(Addr);
       } else {
         CurBasePointers.push_back(CV);
-        if (FirstPrivateDecls.count(VD) && ElementType->isAnyPointerType()) {
+        if (I != FirstPrivateDecls.end() && ElementType->isAnyPointerType()) {
           Address PtrAddr = CGF.EmitLoadOfReference(CGF.MakeAddrLValue(
               CV, ElementType, CGF.getContext().getDeclAlign(VD),
               AlignmentSource::Decl));
@@ -8540,12 +8558,15 @@ public:
           CurPointers.push_back(CV);
         }
       }
+      if (I != FirstPrivateDecls.end())
+        IsImplicit = I->getSecond();
     }
     // Every default map produces a single argument which is a target parameter.
     CurMapTypes.back() |= OMP_MAP_TARGET_PARAM;
 
     // Add flag stating this is an implicit map.
-    CurMapTypes.back() |= OMP_MAP_IMPLICIT;
+    if (IsImplicit)
+      CurMapTypes.back() |= OMP_MAP_IMPLICIT;
   }
 };
 } // anonymous namespace
@@ -9343,7 +9364,8 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
             CGF.getTypeSize(RI->getType()), CGF.Int64Ty, /*isSigned=*/true));
         // Copy to the device as an argument. No need to retrieve it.
         CurMapTypes.push_back(MappableExprsHandler::OMP_MAP_LITERAL |
-                              MappableExprsHandler::OMP_MAP_TARGET_PARAM);
+                              MappableExprsHandler::OMP_MAP_TARGET_PARAM |
+                              MappableExprsHandler::OMP_MAP_IMPLICIT);
       } else {
         // If we have any information in the map clause, we use it, otherwise we
         // just do a default mapping.
