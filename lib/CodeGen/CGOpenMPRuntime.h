@@ -807,8 +807,8 @@ public:
   getUserDefinedReduction(const OMPDeclareReductionDecl *D);
 
   /// Emit the function for the user defined mapper construct.
-  virtual void emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
-                                     CodeGenFunction *CGF = nullptr);
+  void emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
+                             CodeGenFunction *CGF = nullptr);
 
   /// Emit the array initialization or deletion portion for user-defined mapper
   /// code generation.
@@ -2106,10 +2106,6 @@ public:
                                   llvm::Constant *&OutlinedFnID,
                                   bool IsOffloadEntry,
                                   const RegionCodeGenTy &CodeGen) override;
-
-  /// Emit the function for the user defined mapper construct.
-  void emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
-                             CodeGenFunction *CGF = nullptr) override;
 
   /// Emit the target offloading code associated with \a D. The emitted
   /// code attempts offloading the execution to the device, an the event of

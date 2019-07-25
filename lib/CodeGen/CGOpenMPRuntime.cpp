@@ -11239,11 +11239,6 @@ void CGOpenMPSIMDRuntime::emitTargetOutlinedFunction(
   llvm_unreachable("Not supported in SIMD-only mode");
 }
 
-void CGOpenMPSIMDRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
-                                                CodeGenFunction *CGF) {
-  llvm_unreachable("Not supported in SIMD-only mode");
-}
-
 void CGOpenMPSIMDRuntime::emitTargetCall(CodeGenFunction &CGF,
                                          const OMPExecutableDirective &D,
                                          llvm::Function *OutlinedFn,
