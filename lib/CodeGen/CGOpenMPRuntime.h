@@ -349,9 +349,9 @@ private:
   /// functions.
   llvm::DenseMap<const OMPDeclareMapperDecl *, llvm::Function *> UDMMap;
   /// Map of functions and their local user-defined mappers.
-  typedef llvm::DenseMap<llvm::Function *,
-                         SmallVector<const OMPDeclareMapperDecl *, 4>>
-      FunctionUDMMapTy;
+  using FunctionUDMMapTy =
+      llvm::DenseMap<llvm::Function *,
+                     SmallVector<const OMPDeclareMapperDecl *, 4>>;
   FunctionUDMMapTy FunctionUDMMap;
   /// Type kmp_critical_name, originally defined as typedef kmp_int32
   /// kmp_critical_name[8];
@@ -812,10 +812,11 @@ public:
 
   /// Emit the array initialization or deletion portion for user-defined mapper
   /// code generation.
-  virtual void emitUDMapperArrayInitOrDel(
-      CodeGenFunction &MapperCGF, llvm::Value *Handle, llvm::Value *BasePtr,
-      llvm::Value *Ptr, llvm::Value *Size, llvm::Value *MapType,
-      CharUnits ElementSize, llvm::BasicBlock *ExitBB, bool IsInit);
+  void emitUDMapperArrayInitOrDel(CodeGenFunction &MapperCGF,
+                                  llvm::Value *Handle, llvm::Value *BasePtr,
+                                  llvm::Value *Ptr, llvm::Value *Size,
+                                  llvm::Value *MapType, CharUnits ElementSize,
+                                  llvm::BasicBlock *ExitBB, bool IsInit);
 
   /// Emits outlined function for the specified OpenMP parallel directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,
@@ -2106,7 +2107,7 @@ public:
                                   bool IsOffloadEntry,
                                   const RegionCodeGenTy &CodeGen) override;
 
-  /// Emit code for the user defined mapper construct.
+  /// Emit the function for the user defined mapper construct.
   void emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
                              CodeGenFunction *CGF = nullptr) override;
 
