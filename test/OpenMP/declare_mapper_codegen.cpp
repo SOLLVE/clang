@@ -41,11 +41,11 @@ public:
 #pragma omp declare mapper(id: C s) map(s.a, s.b[0:2])
 
 // CK0-LABEL: define {{.*}}void @.omp_mapper.{{.*}}C.id{{.*}}(i8*, i8*, i8*, i64, i64)
-// CK0-DAG: store i8* %0, i8** [[HANDLEADDR:%[^,]+]]
-// CK0-DAG: store i8* %1, i8** [[BPTRADDR:%[^,]+]]
-// CK0-DAG: store i8* %2, i8** [[VPTRADDR:%[^,]+]]
-// CK0-DAG: store i64 %3, i{{64|32}}* [[SIZEADDR:%[^,]+]]
-// CK0-DAG: store i64 %4, i64* [[TYPEADDR:%[^,]+]]
+// CK0: store i8* %{{[^,]+}}, i8** [[HANDLEADDR:%[^,]+]]
+// CK0: store i8* %{{[^,]+}}, i8** [[BPTRADDR:%[^,]+]]
+// CK0: store i8* %{{[^,]+}}, i8** [[VPTRADDR:%[^,]+]]
+// CK0: store i64 %{{[^,]+}}, i{{64|32}}* [[SIZEADDR:%[^,]+]]
+// CK0: store i64 %{{[^,]+}}, i64* [[TYPEADDR:%[^,]+]]
 // CK0-DAG: [[SIZE:%.+]] = load i64, i64* [[SIZEADDR]]
 // CK0-DAG: [[TYPE:%.+]] = load i64, i64* [[TYPEADDR]]
 // CK0-DAG: [[HANDLE:%.+]] = load i8*, i8** [[HANDLEADDR]]
@@ -286,11 +286,11 @@ public:
 #pragma omp declare mapper(id: C<int> s) map(s.a)
 
 // CK1-LABEL: define {{.*}}void @.omp_mapper.{{.*}}C{{.*}}.id{{.*}}(i8*, i8*, i8*, i64, i64)
-// CK1-DAG: store i8* %0, i8** [[HANDLEADDR:%[^,]+]]
-// CK1-DAG: store i8* %1, i8** [[BPTRADDR:%[^,]+]]
-// CK1-DAG: store i8* %2, i8** [[VPTRADDR:%[^,]+]]
-// CK1-DAG: store i64 %3, i{{64|32}}* [[SIZEADDR:%[^,]+]]
-// CK1-DAG: store i64 %4, i64* [[TYPEADDR:%[^,]+]]
+// CK1: store i8* %{{[^,]+}}, i8** [[HANDLEADDR:%[^,]+]]
+// CK1: store i8* %{{[^,]+}}, i8** [[BPTRADDR:%[^,]+]]
+// CK1: store i8* %{{[^,]+}}, i8** [[VPTRADDR:%[^,]+]]
+// CK1: store i64 %{{[^,]+}}, i{{64|32}}* [[SIZEADDR:%[^,]+]]
+// CK1: store i64 %{{[^,]+}}, i64* [[TYPEADDR:%[^,]+]]
 // CK1-DAG: [[SIZE:%.+]] = load i64, i64* [[SIZEADDR]]
 // CK1-DAG: [[TYPE:%.+]] = load i64, i64* [[TYPEADDR]]
 // CK1-DAG: [[HANDLE:%.+]] = load i8*, i8** [[HANDLEADDR]]
