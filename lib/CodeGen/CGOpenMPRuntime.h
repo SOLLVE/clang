@@ -349,9 +349,9 @@ private:
   /// functions.
   llvm::DenseMap<const OMPDeclareMapperDecl *, llvm::Function *> UDMMap;
   /// Map of functions and their local user-defined mappers.
-  typedef llvm::DenseMap<llvm::Function *,
-                         SmallVector<const OMPDeclareMapperDecl *, 4>>
-      FunctionUDMMapTy;
+  using FunctionUDMMapTy =
+      llvm::DenseMap<llvm::Function *,
+                     SmallVector<const OMPDeclareMapperDecl *, 4>>;
   FunctionUDMMapTy FunctionUDMMap;
   /// Type kmp_critical_name, originally defined as typedef kmp_int32
   /// kmp_critical_name[8];
@@ -746,6 +746,14 @@ private:
                                 llvm::Value *Ctor, llvm::Value *CopyCtor,
                                 llvm::Value *Dtor, SourceLocation Loc);
 
+  /// Emit the array initialization or deletion portion for user-defined mapper
+  /// code generation.
+  void emitUDMapperArrayInitOrDel(CodeGenFunction &MapperCGF,
+                                  llvm::Value *Handle, llvm::Value *BasePtr,
+                                  llvm::Value *Ptr, llvm::Value *Size,
+                                  llvm::Value *MapType, CharUnits ElementSize,
+                                  llvm::BasicBlock *ExitBB, bool IsInit);
+
   struct TaskResultTy {
     llvm::Value *NewTask = nullptr;
     llvm::Function *TaskEntry = nullptr;
@@ -806,19 +814,12 @@ public:
   virtual std::pair<llvm::Function *, llvm::Function *>
   getUserDefinedReduction(const OMPDeclareReductionDecl *D);
 
-  /// Emit the function for the user-defined mapper construct.
-  virtual void emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
-                                     CodeGenFunction *CGF = nullptr);
+  /// Emit the function for the user defined mapper construct.
+  void emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
+                             CodeGenFunction *CGF = nullptr);
   /// Get the function for the specified user-defined mapper, if any.
   virtual llvm::Function *
   getUserDefinedMapperFunc(const OMPDeclareMapperDecl *D);
-
-  /// Emit the array initialization or deletion portion for user-defined mapper
-  /// code generation.
-  virtual void emitUDMapperArrayInitOrDel(
-      CodeGenFunction &MapperCGF, llvm::Value *Handle, llvm::Value *BasePtr,
-      llvm::Value *Ptr, llvm::Value *Size, llvm::Value *MapType,
-      CharUnits ElementSize, llvm::BasicBlock *ExitBB, bool IsInit);
 
   /// Emits outlined function for the specified OpenMP parallel directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,
@@ -1143,8 +1144,8 @@ public:
                                          SourceLocation Loc);
 
   /// Returns the address of the variable marked as declare target with link
-  /// clause.
-  virtual Address getAddrOfDeclareTargetLink(const VarDecl *VD);
+  /// clause OR as declare target with to clause and unified memory.
+  virtual Address getAddrOfDeclareTargetVar(const VarDecl *VD);
 
   /// Emit a code for initialization of threadprivate variable. It emits
   /// a call to runtime library which adds initial value to the newly created
@@ -1648,6 +1649,9 @@ public:
   /// the predefined allocator and translates it into the corresponding address
   /// space.
   virtual bool hasAllocateAttributeForGlobalVar(const VarDecl *VD, LangAS &AS);
+
+  /// Return whether the unified_shared_memory has been specified.
+  bool hasRequiresUnifiedSharedMemory() const;
 };
 
 /// Class supports emissionof SIMD-only code.
@@ -2108,10 +2112,6 @@ public:
                                   llvm::Constant *&OutlinedFnID,
                                   bool IsOffloadEntry,
                                   const RegionCodeGenTy &CodeGen) override;
-
-  /// Emit code for the user defined mapper construct.
-  void emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
-                             CodeGenFunction *CGF = nullptr) override;
 
   /// Emit the target offloading code associated with \a D. The emitted
   /// code attempts offloading the execution to the device, an the event of

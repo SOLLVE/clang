@@ -79,6 +79,19 @@ struct FormatStyle {
   /// brackets.
   BracketAlignmentStyle AlignAfterOpenBracket;
 
+  /// \brief If ``true``, aligns consecutive C/C++ preprocessor macros.
+  ///
+  /// This will align C/C++ preprocessor macros of consecutive lines.
+  /// Will result in formattings like
+  /// \code
+  ///   #define SHORT_NAME       42
+  ///   #define LONGER_NAME      0x007f
+  ///   #define EVEN_LONGER_NAME (2)
+  ///   #define foo(x)           (x * x)
+  ///   #define bar(y, z)        (y + z)
+  /// \endcode
+  bool AlignConsecutiveMacros;
+
   /// If ``true``, aligns consecutive assignments.
   ///
   /// This will align the assignment operators of consecutive lines. This
@@ -642,19 +655,28 @@ struct FormatStyle {
     BS_Stroustrup,
     /// Always break before braces.
     /// \code
-    ///   try {
+    ///   try
+    ///   {
     ///     foo();
     ///   }
-    ///   catch () {
+    ///   catch ()
+    ///   {
     ///   }
     ///   void foo() { bar(); }
-    ///   class foo {
+    ///   class foo
+    ///   {
     ///   };
-    ///   if (foo()) {
+    ///   if (foo())
+    ///   {
     ///   }
-    ///   else {
+    ///   else
+    ///   {
     ///   }
-    ///   enum X : int { A, B };
+    ///   enum X : int
+    ///   {
+    ///     A,
+    ///     B
+    ///   };
     /// \endcode
     BS_Allman,
     /// Always break before braces and add an extra level of indentation to
@@ -1185,6 +1207,18 @@ struct FormatStyle {
   ///
   /// For example: Q_UNUSED
   std::vector<std::string> StatementMacros;
+
+  /// A vector of macros which are used to open namespace blocks.
+  ///
+  /// These are expected to be macros of the form:
+  /// \code
+  ///   NAMESPACE(<namespace-name>, ...) {
+  ///     <namespace-content>
+  ///   }
+  /// \endcode
+  ///
+  /// For example: TESTSUITE
+  std::vector<std::string> NamespaceMacros;
 
   tooling::IncludeStyle IncludeStyle;
 
@@ -1933,6 +1967,7 @@ struct FormatStyle {
            MacroBlockEnd == R.MacroBlockEnd &&
            MaxEmptyLinesToKeep == R.MaxEmptyLinesToKeep &&
            NamespaceIndentation == R.NamespaceIndentation &&
+           NamespaceMacros == R.NamespaceMacros &&
            ObjCBinPackProtocolList == R.ObjCBinPackProtocolList &&
            ObjCBlockIndentWidth == R.ObjCBlockIndentWidth &&
            ObjCSpaceAfterProperty == R.ObjCSpaceAfterProperty &&
