@@ -266,7 +266,7 @@ void foo(int a){
 // CK0: {{.+}} = add nsw i32 [[VAL]], 1
 // CK0: }
 
-#endif
+#endif // CK0
 
 
 ///==========================================================================///
@@ -285,6 +285,7 @@ void foo(int a){
 // RUN: %clang_cc1 -DCK1 -fopenmp-simd -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck --check-prefix SIMD-ONLY0 %s
 
 #ifdef CK1
+// C++ template
 
 template <class T>
 class C {
@@ -418,6 +419,168 @@ public:
 // CK1: [[DONE]]
 // CK1: ret void
 
-#endif
+#endif // CK1
 
-#endif
+
+///==========================================================================///
+// RUN: %clang_cc1 -DCK2 -verify -fopenmp -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm -femit-all-decls -disable-llvm-passes %s -o - | FileCheck --check-prefix CK2 --check-prefix CK2-64 %s
+// RUN: %clang_cc1 -DCK2 -fopenmp -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -emit-pch -femit-all-decls -disable-llvm-passes -o %t %s
+// RUN: %clang_cc1 -DCK2 -fopenmp -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck --check-prefix CK2 --check-prefix CK2-64 %s
+// RUN: %clang_cc1 -DCK2 -verify -fopenmp -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -emit-llvm -femit-all-decls -disable-llvm-passes %s -o - | FileCheck --check-prefix CK2 --check-prefix CK2-32 %s
+// RUN: %clang_cc1 -DCK2 -fopenmp -fopenmp-targets=i386-pc-linux-gnu -x c++ -std=c++11 -triple i386-unknown-unknown -emit-pch -femit-all-decls -disable-llvm-passes -o %t %s
+// RUN: %clang_cc1 -DCK2 -fopenmp -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck --check-prefix CK2 --check-prefix CK2-32 %s
+
+// RUN: %clang_cc1 -DCK2 -verify -fopenmp-simd -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm -femit-all-decls -disable-llvm-passes %s -o - | FileCheck --check-prefix SIMD-ONLY0 %s
+// RUN: %clang_cc1 -DCK2 -fopenmp-simd -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -emit-pch -femit-all-decls -disable-llvm-passes -o %t %s
+// RUN: %clang_cc1 -DCK2 -fopenmp-simd -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck --check-prefix SIMD-ONLY0 %s
+// RUN: %clang_cc1 -DCK2 -verify -fopenmp-simd -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -emit-llvm -femit-all-decls -disable-llvm-passes %s -o - | FileCheck --check-prefix SIMD-ONLY0 %s
+// RUN: %clang_cc1 -DCK2 -fopenmp-simd -fopenmp-targets=i386-pc-linux-gnu -x c++ -std=c++11 -triple i386-unknown-unknown -emit-pch -femit-all-decls -disable-llvm-passes -o %t %s
+// RUN: %clang_cc1 -DCK2 -fopenmp-simd -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck --check-prefix SIMD-ONLY0 %s
+
+#ifdef CK2
+// Nested mappers.
+
+class B {
+public:
+  double a;
+};
+
+class C {
+public:
+  double a;
+  B b;
+};
+
+#pragma omp declare mapper(B s) map(s.a)
+
+#pragma omp declare mapper(id: C s) map(s.b)
+
+// CK2: define {{.*}}void [[BMPRFUNC:@[.]omp_mapper[.].*B[.]default]](i8*, i8*, i8*, i64, i64)
+
+// CK2-LABEL: define {{.*}}void @.omp_mapper.{{.*}}C{{.*}}.id(i8*, i8*, i8*, i64, i64)
+// CK2: store i8* %{{[^,]+}}, i8** [[HANDLEADDR:%[^,]+]]
+// CK2: store i8* %{{[^,]+}}, i8** [[BPTRADDR:%[^,]+]]
+// CK2: store i8* %{{[^,]+}}, i8** [[VPTRADDR:%[^,]+]]
+// CK2: store i64 %{{[^,]+}}, i{{64|32}}* [[SIZEADDR:%[^,]+]]
+// CK2: store i64 %{{[^,]+}}, i64* [[TYPEADDR:%[^,]+]]
+// CK2-DAG: [[SIZE:%.+]] = load i64, i64* [[SIZEADDR]]
+// CK2-DAG: [[TYPE:%.+]] = load i64, i64* [[TYPEADDR]]
+// CK2-DAG: [[HANDLE:%.+]] = load i8*, i8** [[HANDLEADDR]]
+// CK2-DAG: [[PTRBEGIN:%.+]] = bitcast i8** [[VPTRADDR]] to %class.C**
+// CK2-DAG: [[PTREND:%.+]] = getelementptr %class.C*, %class.C** [[PTRBEGIN]], i64 [[SIZE]]
+// CK2-DAG: [[BPTR:%.+]] = load i8*, i8** [[BPTRADDR]]
+// CK2-DAG: [[BEGIN:%.+]] = load i8*, i8** [[VPTRADDR]]
+// CK2: [[ISARRAY:%.+]] = icmp sge i64 [[SIZE]], 1
+// CK2: br i1 [[ISARRAY]], label %[[INITEVALDEL:[^,]+]], label %[[LHEAD:[^,]+]]
+
+// CK2: [[INITEVALDEL]]
+// CK2: [[TYPEDEL:%.+]] = and i64 [[TYPE]], 8
+// CK2: [[ISNOTDEL:%.+]] = icmp eq i64 [[TYPEDEL]], 0
+// CK2: br i1 [[ISNOTDEL]], label %[[INIT:[^,]+]], label %[[LHEAD:[^,]+]]
+// CK2: [[INIT]]
+// CK2-DAG: [[ARRSIZE:%.+]] = mul nuw i64 [[SIZE]], 16
+// CK2-DAG: [[ITYPE:%.+]] = and i64 [[TYPE]], -4
+// CK2: call void @__tgt_push_mapper_component(i8* [[HANDLE]], i8* [[BPTR]], i8* [[BEGIN]], i64 [[ARRSIZE]], i64 [[ITYPE]])
+// CK2: br label %[[LHEAD:[^,]+]]
+
+// CK2: [[LHEAD]]
+// CK2: [[ISEMPTY:%.+]] = icmp eq %class.C** [[PTRBEGIN]], [[PTREND]]
+// CK2: br i1 [[ISEMPTY]], label %[[DONE:[^,]+]], label %[[LBODY:[^,]+]]
+// CK2: [[LBODY]]
+// CK2: [[PTR:%.+]] = phi %class.C** [ [[PTRBEGIN]], %[[LHEAD]] ], [ [[PTRNEXT:%.+]], %[[LCORRECT:[^,]+]] ]
+// CK2: [[OBJ:%.+]] = load %class.C*, %class.C** [[PTR]]
+// CK2-DAG: [[BBEGIN:%.+]] = getelementptr inbounds %class.C, %class.C* [[OBJ]], i32 0, i32 1
+// CK2-DAG: [[BEND:%.+]] = getelementptr %class.B, %class.B* [[BBEGIN]], i32 1
+// CK2-DAG: [[BBEGINV:%.+]] = bitcast %class.B* [[BBEGIN]] to i8*
+// CK2-DAG: [[BENDV:%.+]] = bitcast %class.B* [[BEND]] to i8*
+// CK2-DAG: [[BBEGINI:%.+]] = ptrtoint i8* [[BBEGINV]] to i64
+// CK2-DAG: [[BENDI:%.+]] = ptrtoint i8* [[BENDV]] to i64
+// CK2-DAG: [[BSIZE:%.+]] = sub i64 [[BENDI]], [[BBEGINI]]
+// CK2-DAG: [[BUSIZE:%.+]] = sdiv exact i64 [[BSIZE]], ptrtoint (i8* getelementptr (i8, i8* null, i32 1) to i64)
+// CK2-DAG: [[BPTRADDR0BC:%.+]] = bitcast %class.C* [[OBJ]] to i8*
+// CK2-DAG: [[PTRADDR0BC:%.+]] = bitcast %class.B* [[BBEGIN]] to i8*
+// CK2-DAG: [[PRESIZE:%.+]] = call i64 @__tgt_mapper_num_components(i8* [[HANDLE]])
+// CK2-DAG: [[SHIPRESIZE:%.+]] = shl i64 [[PRESIZE]], 48
+// CK2-DAG: br label %[[MEMBER:[^,]+]]
+// CK2-DAG: [[MEMBER]]
+// CK2-DAG: br i1 true, label %[[LTYPE:[^,]+]], label %[[MEMBERCOM:[^,]+]]
+// CK2-DAG: [[MEMBERCOM]]
+// CK2-DAG: [[MEMBERCOMTYPE:%.+]] = add nuw i64 32, [[SHIPRESIZE]]
+// CK2-DAG: br label %[[LTYPE]]
+// CK2-DAG: [[LTYPE]]
+// CK2-DAG: [[MEMBERTYPE:%.+]] = phi i64 [ 32, %[[MEMBER]] ], [ [[MEMBERCOMTYPE]], %[[MEMBERCOM]] ]
+// CK2-DAG: [[TYPETF:%.+]] = and i64 [[TYPE]], 3
+// CK2-DAG: [[ISALLOC:%.+]] = icmp eq i64 [[TYPETF]], 0
+// CK2-DAG: br i1 [[ISALLOC]], label %[[ALLOC:[^,]+]], label %[[ALLOCELSE:[^,]+]]
+// CK2-DAG: [[ALLOC]]
+// CK2-DAG: [[ALLOCTYPE:%.+]] = and i64 [[MEMBERTYPE]], -4
+// CK2-DAG: br label %[[TYEND:[^,]+]]
+// CK2-DAG: [[ALLOCELSE]]
+// CK2-DAG: [[ISTO:%.+]] = icmp eq i64 [[TYPETF]], 1
+// CK2-DAG: br i1 [[ISTO]], label %[[TO:[^,]+]], label %[[TOELSE:[^,]+]]
+// CK2-DAG: [[TO]]
+// CK2-DAG: [[TOTYPE:%.+]] = and i64 [[MEMBERTYPE]], -3
+// CK2-DAG: br label %[[TYEND]]
+// CK2-DAG: [[TOELSE]]
+// CK2-DAG: [[ISFROM:%.+]] = icmp eq i64 [[TYPETF]], 2
+// CK2-DAG: br i1 [[ISFROM]], label %[[FROM:[^,]+]], label %[[TYEND]]
+// CK2-DAG: [[FROM]]
+// CK2-DAG: [[FROMTYPE:%.+]] = and i64 [[MEMBERTYPE]], -2
+// CK2-DAG: br label %[[TYEND]]
+// CK2-DAG: [[TYEND]]
+// CK2-DAG: [[TYPE0:%.+]] = phi i64 [ [[ALLOCTYPE]], %[[ALLOC]] ], [ [[TOTYPE]], %[[TO]] ], [ [[FROMTYPE]], %[[FROM]] ], [ [[MEMBERTYPE]], %[[TOELSE]] ]
+// CK2-64: call void @__tgt_push_mapper_component(i8* [[HANDLE]], i8* [[BPTRADDR0BC]], i8* [[PTRADDR0BC]], i64 [[BUSIZE]], i64 [[TYPE0]])
+// CK2-DAG: [[BPTRADDR1BC:%.+]] = bitcast %class.C* [[OBJ]] to i8*
+// CK2-DAG: [[PTRADDR1BC:%.+]] = bitcast %class.B* [[BBEGIN]] to i8*
+// CK2-DAG: br label %[[MEMBER:[^,]+]]
+// CK2-DAG: [[MEMBER]]
+// CK2-DAG: br i1 false, label %[[LTYPE:[^,]+]], label %[[MEMBERCOM:[^,]+]]
+// CK2-DAG: [[MEMBERCOM]]
+// 281474976710659 == 0x1,000,000,003
+// CK2-DAG: [[MEMBERCOMTYPE:%.+]] = add nuw i64 281474976710659, [[SHIPRESIZE]]
+// CK2-DAG: br label %[[LTYPE]]
+// CK2-DAG: [[LTYPE]]
+// CK2-DAG: [[MEMBERTYPE:%.+]] = phi i64 [ 281474976710659, %[[MEMBER]] ], [ [[MEMBERCOMTYPE]], %[[MEMBERCOM]] ]
+// CK2-DAG: [[TYPETF:%.+]] = and i64 [[TYPE]], 3
+// CK2-DAG: [[ISALLOC:%.+]] = icmp eq i64 [[TYPETF]], 0
+// CK2-DAG: br i1 [[ISALLOC]], label %[[ALLOC:[^,]+]], label %[[ALLOCELSE:[^,]+]]
+// CK2-DAG: [[ALLOC]]
+// CK2-DAG: [[ALLOCTYPE:%.+]] = and i64 [[MEMBERTYPE]], -4
+// CK2-DAG: br label %[[TYEND:[^,]+]]
+// CK2-DAG: [[ALLOCELSE]]
+// CK2-DAG: [[ISTO:%.+]] = icmp eq i64 [[TYPETF]], 1
+// CK2-DAG: br i1 [[ISTO]], label %[[TO:[^,]+]], label %[[TOELSE:[^,]+]]
+// CK2-DAG: [[TO]]
+// CK2-DAG: [[TOTYPE:%.+]] = and i64 [[MEMBERTYPE]], -3
+// CK2-DAG: br label %[[TYEND]]
+// CK2-DAG: [[TOELSE]]
+// CK2-DAG: [[ISFROM:%.+]] = icmp eq i64 [[TYPETF]], 2
+// CK2-DAG: br i1 [[ISFROM]], label %[[FROM:[^,]+]], label %[[TYEND]]
+// CK2-DAG: [[FROM]]
+// CK2-DAG: [[FROMTYPE:%.+]] = and i64 [[MEMBERTYPE]], -2
+// CK2-DAG: br label %[[TYEND]]
+// CK2-DAG: [[TYEND]]
+// CK2-DAG: [[TYPE1:%.+]] = phi i64 [ [[ALLOCTYPE]], %[[ALLOC]] ], [ [[TOTYPE]], %[[TO]] ], [ [[FROMTYPE]], %[[FROM]] ], [ [[MEMBERTYPE]], %[[TOELSE]] ]
+// CK2: call void [[BMPRFUNC]](i8* [[HANDLE]], i8* [[BPTRADDR1BC]], i8* [[PTRADDR1BC]], i64 1, i64 [[TYPE1]])
+// CK2: [[PTRNEXT]] = getelementptr %class.C*, %class.C** [[PTR]], i32 1
+// CK2: [[ISDONE:%.+]] = icmp eq %class.C** [[PTRNEXT]], [[PTREND]]
+// CK2: br i1 [[ISDONE]], label %[[LEXIT:[^,]+]], label %[[LBODY]]
+
+// CK2: [[LEXIT]]
+// CK2: [[ISARRAY:%.+]] = icmp sge i64 [[SIZE]], 1
+// CK2: br i1 [[ISARRAY]], label %[[EVALDEL:[^,]+]], label %[[DONE]]
+// CK2: [[EVALDEL]]
+// CK2: [[TYPEDEL:%.+]] = and i64 [[TYPE]], 8
+// CK2: [[ISDEL:%.+]] = icmp ne i64 [[TYPEDEL]], 0
+// CK2: br i1 [[ISDEL]], label %[[DEL:[^,]+]], label %[[DONE]]
+// CK2: [[DEL]]
+// CK2-DAG: [[ARRSIZE:%.+]] = mul nuw i64 [[SIZE]], 16
+// CK2-DAG: [[DTYPE:%.+]] = and i64 [[TYPE]], -4
+// CK2: call void @__tgt_push_mapper_component(i8* [[HANDLE]], i8* [[BPTR]], i8* [[BEGIN]], i64 [[ARRSIZE]], i64 [[DTYPE]])
+// CK2: br label %[[DONE]]
+// CK2: [[DONE]]
+// CK2: ret void
+
+#endif // CK2
+
+#endif // HEADER
