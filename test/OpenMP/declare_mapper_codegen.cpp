@@ -37,7 +37,7 @@ public:
 
 #pragma omp declare mapper(id: C s) map(s.a, s.b[0:2])
 
-// CK0: define {{.*}}void [[MPRFUNC:@[.]omp_mapper[.].*C[.]id]](i8*, i8*, i8*, i64, i64)
+// CK0: define {{.*}}void [[MPRFUNC:@[.]omp_mapper[.].*C[.]id]](i8*{{.*}}, i8*{{.*}}, i8*{{.*}}, i64{{.*}}, i64{{.*}})
 // CK0: store i8* %{{[^,]+}}, i8** [[HANDLEADDR:%[^,]+]]
 // CK0: store i8* %{{[^,]+}}, i8** [[BPTRADDR:%[^,]+]]
 // CK0: store i8* %{{[^,]+}}, i8** [[VPTRADDR:%[^,]+]]
@@ -295,7 +295,7 @@ public:
 
 #pragma omp declare mapper(id: C<int> s) map(s.a)
 
-// CK1-LABEL: define {{.*}}void @.omp_mapper.{{.*}}C{{.*}}.id{{.*}}(i8*, i8*, i8*, i64, i64)
+// CK1-LABEL: define {{.*}}void @.omp_mapper.{{.*}}C{{.*}}.id{{.*}}(i8*{{.*}}, i8*{{.*}}, i8*{{.*}}, i64{{.*}}, i64{{.*}})
 // CK1: store i8* %{{[^,]+}}, i8** [[HANDLEADDR:%[^,]+]]
 // CK1: store i8* %{{[^,]+}}, i8** [[BPTRADDR:%[^,]+]]
 // CK1: store i8* %{{[^,]+}}, i8** [[VPTRADDR:%[^,]+]]
@@ -455,9 +455,9 @@ public:
 
 #pragma omp declare mapper(id: C s) map(s.b)
 
-// CK2: define {{.*}}void [[BMPRFUNC:@[.]omp_mapper[.].*B[.]default]](i8*, i8*, i8*, i64, i64)
+// CK2: define {{.*}}void [[BMPRFUNC:@[.]omp_mapper[.].*B[.]default]](i8*{{.*}}, i8*{{.*}}, i8*{{.*}}, i64{{.*}}, i64{{.*}})
 
-// CK2-LABEL: define {{.*}}void @.omp_mapper.{{.*}}C{{.*}}.id(i8*, i8*, i8*, i64, i64)
+// CK2-LABEL: define {{.*}}void @.omp_mapper.{{.*}}C{{.*}}.id(i8*{{.*}}, i8*{{.*}}, i8*{{.*}}, i64{{.*}}, i64{{.*}})
 // CK2: store i8* %{{[^,]+}}, i8** [[HANDLEADDR:%[^,]+]]
 // CK2: store i8* %{{[^,]+}}, i8** [[BPTRADDR:%[^,]+]]
 // CK2: store i8* %{{[^,]+}}, i8** [[VPTRADDR:%[^,]+]]
