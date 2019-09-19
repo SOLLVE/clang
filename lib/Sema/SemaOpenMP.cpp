@@ -14424,6 +14424,7 @@ struct MappableVarListInfo {
 };
 }
 
+#include <iostream>
 // Check the validity of the provided variable list for the provided clause kind
 // \a CKind. In the check process the valid expressions, mappable expression
 // components, variables, and user-defined mappers are extracted and used to
@@ -14489,6 +14490,8 @@ static void checkMappableExpressionList(
       if (ER.isInvalid())
         continue;
       MVLI.UDMapperList.push_back(ER.get());
+    std::cerr << "K " << MVLI.UDMapperList.back() << "\n";
+    MVLI.UDMapperList.back()->dump();
       // We can only analyze this information once the missing information is
       // resolved.
       MVLI.ProcessedVarList.push_back(RE);
@@ -14527,6 +14530,8 @@ static void checkMappableExpressionList(
       if (ER.isInvalid())
         continue;
       MVLI.UDMapperList.push_back(ER.get());
+    std::cerr << "K " << MVLI.UDMapperList.back() << "\n";
+    MVLI.UDMapperList.back()->dump();
       // Skip restriction checking for variable or field declarations
       MVLI.ProcessedVarList.push_back(RE);
       MVLI.VarComponents.resize(MVLI.VarComponents.size() + 1);
@@ -14659,6 +14664,8 @@ static void checkMappableExpressionList(
     if (ER.isInvalid())
       continue;
     MVLI.UDMapperList.push_back(ER.get());
+    std::cerr << "K " << MVLI.UDMapperList.back() << "\n";
+    MVLI.UDMapperList.back()->dump();
 
     // Save the current expression.
     MVLI.ProcessedVarList.push_back(RE);

@@ -7969,6 +7969,7 @@ private:
             Mappers.push_back(Mapper);
           else
             Mappers.push_back(nullptr);
+          std::cerr << "HH " << "\n";
           if (hasMapper) {
             std::cerr << "AM: " << Mappers.size() << " ";
             I->getAssociatedExpression()->dump();
@@ -8585,6 +8586,7 @@ public:
     assert(CurDir.is<const OMPExecutableDirective *>() &&
            "Expect a executable directive");
     const auto *CurExecDir = CurDir.get<const OMPExecutableDirective *>();
+    std::cerr << "C " << "\n";
     for (const auto *C : CurExecDir->getClausesOfKind<OMPMapClause>()) {
       for (const auto &L : C->decl_component_lists(VD)) {
         const ValueDecl *VDecl, *Mapper;
@@ -9242,6 +9244,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
 
   // Emit the loop body block.
   MapperCGF.EmitBlock(BodyBB);
+  llvm::BasicBlock *LastBB = BodyBB;
   llvm::PHINode *PtrPHI = MapperCGF.Builder.CreatePHI(
       PtrBegin->getType(), 2, "omp.arraymap.ptrcurrent");
   PtrPHI->addIncoming(PtrBegin, EntryBB);
@@ -9364,6 +9367,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
         MapperCGF.Builder.getInt64(~MappableExprsHandler::OMP_MAP_TO));
     // In case of tofrom, do nothing.
     MapperCGF.EmitBlock(EndBB);
+    LastBB = EndBB;
     llvm::PHINode *CurMapType =
         MapperCGF.Builder.CreatePHI(CGM.Int64Ty, 4, "omp.maptype");
     CurMapType->addIncoming(AllocMapType, AllocBB);
@@ -9392,7 +9396,7 @@ void CGOpenMPRuntime::emitUserDefinedMapper(const OMPDeclareMapperDecl *D,
   // and check whether we have mapped all elements.
   llvm::Value *PtrNext = MapperCGF.Builder.CreateConstGEP1_32(
       PtrPHI, /*Idx0=*/1, "omp.arraymap.next");
-  PtrPHI->addIncoming(PtrNext, BodyBB);
+  PtrPHI->addIncoming(PtrNext, LastBB);
   llvm::Value *IsDone =
       MapperCGF.Builder.CreateICmpEQ(PtrNext, PtrEnd, "omp.arraymap.isdone");
   llvm::BasicBlock *ExitBB = MapperCGF.createBasicBlock("omp.arraymap.exit");
