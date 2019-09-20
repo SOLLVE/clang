@@ -37,7 +37,6 @@
 #include <cstddef>
 #include <iterator>
 #include <utility>
-#include <iostream>
 
 namespace clang {
 
@@ -4641,8 +4640,6 @@ public:
       // update the state so that we know the component where a given list
       // starts.
       for (; DeclCur != UniqueDecls.end(); ++DeclCur, ++NumListsCur) {
-        if (hasMapper)
-          ++MapperCur;
         if (*DeclCur == Declaration)
           break;
 
@@ -4653,6 +4650,9 @@ public:
         std::advance(ListSizeCur, *NumListsCur - 1);
         PrevListSize = *ListSizeCur;
         ++ListSizeCur;
+
+        if (hasMapper)
+          ++MapperCur;
       }
 
       // If we didn't find any declaration, advance the iterator to after the
@@ -4683,13 +4683,8 @@ public:
     operator*() const {
       assert(ListSizeCur != ListSizeEnd && "Invalid iterator!");
       const ValueDecl *Mapper = nullptr;
-      std::cerr << "Ha " << *MapperCur << "\n";
-      (*DeclCur)->dump();
-      MappableExprComponentListRef(&*this->I, *ListSizeCur - PrevListSize).begin()->getAssociatedExpression()->dump();
-      //if (hasMapper && *MapperCur)
-      //  (*MapperCur)->dump();
-      //if (hasMapper && *MapperCur)
-      //  Mapper = cast<ValueDecl>(cast<DeclRefExpr>(*MapperCur)->getDecl());
+      if (hasMapper && *MapperCur)
+        Mapper = cast<ValueDecl>(cast<DeclRefExpr>(*MapperCur)->getDecl());
       return std::make_tuple(
           *DeclCur,
           MappableExprComponentListRef(&*this->I, *ListSizeCur - PrevListSize),

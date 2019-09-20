@@ -238,7 +238,7 @@ void foo(int a){
   // CK0-DAG: store %class.C* [[VAL]], %class.C** [[TCBP0]]
   // CK0-DAG: store %class.C* [[VAL]], %class.C** [[TCP0]]
   // CK0-DAG: store void (i8*, i8*, i8*, i64, i64)* [[MPRFUNC]], void (i8*, i8*, i8*, i64, i64)** [[TCMPR1]]
-  //#pragma omp target update to(mapper(id): c)
+  #pragma omp target update to(mapper(id): c)
 
   // CK0-DAG: call void @__tgt_target_data_update_mapper(i64 -1, i32 1, i8** [[FGEPBP:%.+]], i8** [[FGEPP:%.+]], i64* getelementptr {{.+}}[1 x i64]* [[FSIZES]], i32 0, i32 0), {{.+}}getelementptr {{.+}}[1 x i64]* [[FTYPES]]{{.+}}, i8** [[FMPRGEP:%.+]])
   // CK0-DAG: [[FGEPBP]] = getelementptr inbounds {{.+}}[[FBP:%[^,]+]], i{{.+}} 0, i{{.+}} 0
@@ -253,7 +253,7 @@ void foo(int a){
   // CK0-DAG: store %class.C* [[VAL]], %class.C** [[FCBP0]]
   // CK0-DAG: store %class.C* [[VAL]], %class.C** [[FCP0]]
   // CK0-DAG: store void (i8*, i8*, i8*, i64, i64)* [[MPRFUNC]], void (i8*, i8*, i8*, i64, i64)** [[FCMPR1]]
-  //#pragma omp target update from(mapper(id): c)
+  #pragma omp target update from(mapper(id): c)
 }
 
 

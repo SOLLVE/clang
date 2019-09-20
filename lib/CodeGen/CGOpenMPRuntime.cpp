@@ -7969,7 +7969,6 @@ private:
             Mappers.push_back(Mapper);
           else
             Mappers.push_back(nullptr);
-          std::cerr << "HH " << "\n";
           if (hasMapper) {
             std::cerr << "AM: " << Mappers.size() << " ";
             I->getAssociatedExpression()->dump();
@@ -8586,7 +8585,6 @@ public:
     assert(CurDir.is<const OMPExecutableDirective *>() &&
            "Expect a executable directive");
     const auto *CurExecDir = CurDir.get<const OMPExecutableDirective *>();
-    std::cerr << "C " << "\n";
     for (const auto *C : CurExecDir->getClausesOfKind<OMPMapClause>()) {
       for (const auto &L : C->decl_component_lists(VD)) {
         const ValueDecl *VDecl, *Mapper;
@@ -8980,9 +8978,11 @@ emitOffloadingArrays(CodeGenFunction &CGF,
 
       // Fill up the mapper array.
       llvm::Value *MFunc = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
-      if (Mappers[I])
+      if (Mappers[I]) {
         MFunc = CGM.getOpenMPRuntime().getUserDefinedMapperFunc(
             cast<OMPDeclareMapperDecl>(Mappers[I]));
+        Info.hasMapper = true;
+      }
       llvm::Value *M = CGF.Builder.CreateConstInBoundsGEP2_32(
           llvm::ArrayType::get(CGM.VoidPtrTy, Info.NumberOfPtrs),
           Info.MappersArray, 0, I);
@@ -9020,10 +9020,13 @@ static void emitOffloadingArraysArgument(
         Info.MapTypesArray,
         /*Idx0=*/0,
         /*Idx1=*/0);
-    MappersArrayArg = CGF.Builder.CreateConstInBoundsGEP2_32(
-        llvm::ArrayType::get(CGM.VoidPtrTy, Info.NumberOfPtrs),
-        Info.MappersArray,
-        /*Idx0=*/0, /*Idx1=*/0);
+    if (Info.hasMapper)
+      MappersArrayArg = CGF.Builder.CreateConstInBoundsGEP2_32(
+          llvm::ArrayType::get(CGM.VoidPtrTy, Info.NumberOfPtrs),
+          Info.MappersArray,
+          /*Idx0=*/0, /*Idx1=*/0);
+    else
+      MappersArrayArg = llvm::ConstantPointerNull::get(CGM.VoidPtrPtrTy);
   } else {
     BasePointersArrayArg = llvm::ConstantPointerNull::get(CGM.VoidPtrPtrTy);
     PointersArrayArg = llvm::ConstantPointerNull::get(CGM.VoidPtrPtrTy);
@@ -9688,7 +9691,6 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       MappableExprsHandler::MapFlagsArrayTy CurMapTypes;
       MappableExprsHandler::MapMappersArrayTy CurMappers;
       MappableExprsHandler::StructRangeInfoTy PartialStruct;
-      (*CV)->dump();
 
       // VLA sizes are passed to the outlined region by copy and do not have map
       // information associated.
