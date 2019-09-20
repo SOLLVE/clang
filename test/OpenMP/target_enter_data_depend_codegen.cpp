@@ -377,7 +377,7 @@ void foo(int arg) {
 }
 
 // CK1: define internal{{.*}} i32 [[TASK_ENTRY0]](i32{{.*}}, %struct.kmp_task_t_with_privates* noalias %1)
-// CK1-DAG: call void @__tgt_target_data_begin_nowait(i64 [[DEV:%[^,]+]], i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE00]]{{.+}})
+// CK1-DAG: call void @__tgt_target_data_begin_nowait_mapper(i64 [[DEV:%[^,]+]], i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE00]]{{.+}}, i8** null)
 // CK1-DAG: [[DEV]] = sext i32 [[DEVi32:%[^,]+]] to i64
 // CK1-DAG: [[DEVi32]] = load i32, i32* %{{[^,]+}},
 // CK1-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
@@ -391,7 +391,7 @@ void foo(int arg) {
 // CK1: }
 
 // CK1: define internal{{.*}} i32 [[TASK_ENTRY2]](i32{{.*}}, %struct.kmp_task_t_with_privates{{.+}}* noalias %1)
-// CK1-DAG: call void @__tgt_target_data_begin(i64 4, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE02]]{{.+}})
+// CK1-DAG: call void @__tgt_target_data_begin_mapper(i64 4, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE02]]{{.+}}, i8** null)
 // CK1-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
 // CK1-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
 // CK1-DAG: [[GEPS]] = getelementptr inbounds {{.+}}[[S:%[^,]+]]
@@ -403,7 +403,7 @@ void foo(int arg) {
 // CK1: }
 
 // CK1: define internal{{.*}} i32 [[TASK_ENTRY3]](i32{{.*}}, %struct.kmp_task_t_with_privates{{.+}}* noalias %1)
-// CK1-DAG: call void @__tgt_target_data_begin(i64 -1, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE03]]{{.+}})
+// CK1-DAG: call void @__tgt_target_data_begin_mapper(i64 -1, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE03]]{{.+}}, i8** null)
 // CK1-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
 // CK1-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
 // CK1-DAG: [[GEPS]] = getelementptr inbounds {{.+}}[[S:%[^,]+]]
@@ -417,7 +417,7 @@ void foo(int arg) {
 // CK1: }
 
 // CK1: define internal{{.*}} i32 [[TASK_ENTRY4]](i32{{.*}}, %struct.kmp_task_t_with_privates{{.+}}* noalias %1)
-// CK1-DAG: call void @__tgt_target_data_begin(i64 -1, i32 2, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[2 x i{{.+}}]* [[MTYPE04]]{{.+}})
+// CK1-DAG: call void @__tgt_target_data_begin_mapper(i64 -1, i32 2, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[2 x i{{.+}}]* [[MTYPE04]]{{.+}}, i8** null)
 // CK1-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
 // CK1-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
 // CK1-DAG: [[GEPS]] = getelementptr inbounds {{.+}}[[S:%[^,]+]]
