@@ -9020,12 +9020,12 @@ static void emitOffloadingArraysArgument(
         Info.MapTypesArray,
         /*Idx0=*/0,
         /*Idx1=*/0);
-    if (Info.hasMapper)
+    if (Info.hasMapper) {
       MappersArrayArg = CGF.Builder.CreateConstInBoundsGEP2_32(
           llvm::ArrayType::get(CGM.VoidPtrTy, Info.NumberOfPtrs),
           Info.MappersArray,
           /*Idx0=*/0, /*Idx1=*/0);
-    else
+    } else
       MappersArrayArg = llvm::ConstantPointerNull::get(CGM.VoidPtrPtrTy);
   } else {
     BasePointersArrayArg = llvm::ConstantPointerNull::get(CGM.VoidPtrPtrTy);
