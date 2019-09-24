@@ -27,7 +27,6 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
-#include <iostream>
 
 using namespace clang;
 using namespace CodeGen;
@@ -7969,11 +7968,6 @@ private:
             Mappers.push_back(Mapper);
           else
             Mappers.push_back(nullptr);
-          if (hasMapper) {
-            std::cerr << "AM: " << Mappers.size() << " ";
-            I->getAssociatedExpression()->dump();
-            //Size->dump();
-          }
 
           // We need to add a pointer flag for each map that comes from the
           // same expression except for the first one. We also need to signal
