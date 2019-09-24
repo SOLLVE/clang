@@ -14303,6 +14303,11 @@ static ExprResult buildUserDefinedMapperRef(Sema &SemaRef, Scope *S,
                                             const DeclarationNameInfo &MapperId,
                                             QualType Type,
                                             Expr *UnresolvedMapper) {
+  // Get the actual type for the array type.
+  if (Type->isArrayType()) {
+    assert(Type->getAsArrayTypeUnsafe() && "Expect to get a valid array type");
+    Type = Type->getAsArrayTypeUnsafe()->getElementType();
+  }
   if (MapperIdScopeSpec.isInvalid())
     return ExprError();
   // Find all user-defined mappers with the given MapperId.

@@ -20,6 +20,7 @@
 // RUN: %clang_cc1 -DCK0 -fopenmp-simd -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck --check-prefix SIMD-ONLY0 %s
 
 #ifdef CK0
+// Mapper function code generation and runtime interface.
 
 // CK0-LABEL: @.__omp_offloading_{{.*}}foo{{.*}}.region_id = weak constant i8 0
 // CK0: [[SIZES:@.+]] = {{.+}}constant [1 x i64] [i64 1]
@@ -730,5 +731,69 @@ public:
 // CK2: ret void
 
 #endif // CK2
+
+
+///==========================================================================///
+// RUN: %clang_cc1 -DCK3 -verify -fopenmp -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm -femit-all-decls -disable-llvm-passes %s -o - | FileCheck --check-prefix CK3 %s
+// RUN: %clang_cc1 -DCK3 -fopenmp -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -emit-pch -femit-all-decls -disable-llvm-passes -o %t %s
+// RUN: %clang_cc1 -DCK3 -fopenmp -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck --check-prefix CK3 %s
+// RUN: %clang_cc1 -DCK3 -verify -fopenmp -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -emit-llvm -femit-all-decls -disable-llvm-passes %s -o - | FileCheck --check-prefix CK3 %s
+// RUN: %clang_cc1 -DCK3 -fopenmp -fopenmp-targets=i386-pc-linux-gnu -x c++ -std=c++11 -triple i386-unknown-unknown -emit-pch -femit-all-decls -disable-llvm-passes -o %t %s
+// RUN: %clang_cc1 -DCK3 -fopenmp -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck --check-prefix CK3 %s
+
+// RUN: %clang_cc1 -DCK3 -verify -fopenmp-simd -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm -femit-all-decls -disable-llvm-passes %s -o - | FileCheck --check-prefix SIMD-ONLY0 %s
+// RUN: %clang_cc1 -DCK3 -fopenmp-simd -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -emit-pch -femit-all-decls -disable-llvm-passes -o %t %s
+// RUN: %clang_cc1 -DCK3 -fopenmp-simd -fopenmp-targets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck --check-prefix SIMD-ONLY0 %s
+// RUN: %clang_cc1 -DCK3 -verify -fopenmp-simd -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -emit-llvm -femit-all-decls -disable-llvm-passes %s -o - | FileCheck --check-prefix SIMD-ONLY0 %s
+// RUN: %clang_cc1 -DCK3 -fopenmp-simd -fopenmp-targets=i386-pc-linux-gnu -x c++ -std=c++11 -triple i386-unknown-unknown -emit-pch -femit-all-decls -disable-llvm-passes -o %t %s
+// RUN: %clang_cc1 -DCK3 -fopenmp-simd -fopenmp-targets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -femit-all-decls -disable-llvm-passes -include-pch %t -verify %s -emit-llvm -o - | FileCheck --check-prefix SIMD-ONLY0 %s
+
+#ifdef CK3
+// map of array section.
+
+// CK3-LABEL: @.__omp_offloading_{{.*}}foo{{.*}}.region_id = weak constant i8 0
+// CK3: [[SIZES:@.+]] = {{.+}}constant [1 x i64] [i64 10]
+// CK3: [[TYPES:@.+]] = {{.+}}constant [1 x i64] [i64 35]
+
+class C {
+public:
+  int a;
+  double *b;
+};
+
+#pragma omp declare mapper(id: C s) map(s.a, s.b[0:2])
+
+// CK3: define {{.*}}void [[MPRFUNC:@[.]omp_mapper[.].*C[.]id]](i8*{{.*}}, i8*{{.*}}, i8*{{.*}}, i64{{.*}}, i64{{.*}})
+
+// CK3-LABEL: define {{.*}}void @{{.*}}foo{{.*}}
+void foo(int a){
+  C c[10];
+
+  // CK3-DAG: call i32 @__tgt_target_mapper(i64 {{.+}}, i8* {{.+}}, i32 1, i8** [[BPGEP:%[0-9]+]], i8** [[PGEP:%[0-9]+]], {{.+}}[[SIZES]]{{.+}}, {{.+}}[[TYPES]]{{.+}}, i8** [[MPRGEP:%.+]])
+  // CK3-DAG: [[BPGEP]] = getelementptr inbounds {{.+}}[[BPS:%[^,]+]], i32 0, i32 0
+  // CK3-DAG: [[PGEP]] = getelementptr inbounds {{.+}}[[PS:%[^,]+]], i32 0, i32 0
+  // CK3-DAG: [[MPRGEP]] = getelementptr inbounds {{.+}}[[MPR:%[^,]+]], i32 0, i32 0
+  // CK3-DAG: [[BP1:%.+]] = getelementptr inbounds {{.+}}[[BPS]], i32 0, i32 0
+  // CK3-DAG: [[P1:%.+]] = getelementptr inbounds {{.+}}[[PS]], i32 0, i32 0
+  // CK3-DAG: [[MPR1:%.+]] = getelementptr inbounds {{.+}}[[MPR]], i32 0, i32 0
+  // CK3-DAG: [[CBP1:%.+]] = bitcast i8** [[BP1]] to [10 x %class.C]**
+  // CK3-DAG: [[CP1:%.+]] = bitcast i8** [[P1]] to %class.C**
+  // CK3-DAG: [[CMPR1:%.+]] = bitcast i8** [[MPR1]] to void (i8*, i8*, i8*, i64, i64)**
+  // CK3-DAG: store [10 x %class.C]* [[VAL:%[^,]+]], [10 x %class.C]** [[CBP1]]
+  // CK3-DAG: [[VAL]] = alloca [10 x %class.C]
+  // CK3-DAG: [[VALGEP:%.+]] = getelementptr inbounds {{.+}}[[VAL]], i{{64|32}} 0, i{{64|32}} 0
+  // CK3-DAG: store %class.C* [[VALGEP]], %class.C** [[CP1]]
+  // CK3-DAG: store void (i8*, i8*, i8*, i64, i64)* [[MPRFUNC]], void (i8*, i8*, i8*, i64, i64)** [[CMPR1]]
+  // CK3: call void [[KERNEL:@.+]]([10 x %class.C]* [[VAL]])
+  #pragma omp target map(mapper(id),tofrom: c[0:10])
+  for (int i = 0; i < 10; i++) {
+    ++c[i].a;
+  }
+}
+
+
+// CK3: define internal void [[KERNEL]]([10 x %class.C]* {{.+}}[[ARG:%.+]])
+
+#endif // CK3
 
 #endif // HEADER
