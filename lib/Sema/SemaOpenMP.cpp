@@ -14306,7 +14306,7 @@ static ExprResult buildUserDefinedMapperRef(Sema &SemaRef, Scope *S,
   // Get the actual type for the array type.
   if (Type->isArrayType()) {
     assert(Type->getAsArrayTypeUnsafe() && "Expect to get a valid array type");
-    Type = Type->getAsArrayTypeUnsafe()->getElementType();
+    Type = Type->getAsArrayTypeUnsafe()->getElementType().getCanonicalType();
   }
   if (MapperIdScopeSpec.isInvalid())
     return ExprError();
