@@ -14803,7 +14803,6 @@ static ExprResult buildUserDefinedMapperRef(Sema &SemaRef, Scope *S,
   //  The type must be of struct, union or class type in C and C++
   if (!Type->isStructureOrClassType() && !Type->isUnionType() &&
       (MapperIdScopeSpec.isSet() || MapperId.getAsString() != "default")) {
-    Type->dump();
     SemaRef.Diag(Loc, diag::err_omp_mapper_wrong_type);
     return ExprError();
   }
