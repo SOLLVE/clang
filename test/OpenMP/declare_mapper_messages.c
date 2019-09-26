@@ -37,6 +37,7 @@ int fun(int arg) {
 #pragma omp declare mapper(id: struct vec v) map(v.len) allocate(v)   // expected-error {{unexpected OpenMP clause 'allocate' in directive '#pragma omp declare mapper'}}
       struct vec vv, v1;
       struct vec arr[10];
+      double d;
 #pragma omp target map(mapper)                                          // expected-error {{use of undeclared identifier 'mapper'}}
       {}
 #pragma omp target map(mapper:vv)                                       // expected-error {{expected '(' after 'mapper'}}
@@ -51,6 +52,8 @@ int fun(int arg) {
       {}
 #pragma omp target map(mapper(aa) :vv)                                  // expected-error {{missing map type}}
       {}
+#pragma omp target map(mapper(aa) to:d)                                 // expected-error {{mapper type must be of struct, union or class type}}
+      {}
 #pragma omp target map(mapper(aa) to:vv) map(close mapper(aa) from:v1) map(mapper(aa) to:arr[0])
       {}
 
@@ -62,6 +65,7 @@ int fun(int arg) {
 #pragma omp target update to(mapper(ab):vv)                             // expected-error {{cannot find a valid user-defined mapper for type 'struct vec' with name 'ab'}} expected-error {{expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'}}
 #pragma omp target update to(mapper(ab):arr[0:2])                       // expected-error {{cannot find a valid user-defined mapper for type 'struct vec' with name 'ab'}} expected-error {{expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'}}
 #pragma omp target update to(mapper(aa) a:vv)                           // expected-warning {{missing ':' after ) - ignoring}}
+#pragma omp target update to(mapper(aa):d)                              // expected-error {{mapper type must be of struct, union or class type}} expected-error {{expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'}}
 #pragma omp target update to(mapper(aa):vv) to(mapper(aa):arr[0])
 
 #pragma omp target update from(mapper)                                  // expected-error {{expected '(' after 'mapper'}} expected-error {{expected expression}} expected-error {{expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'}}
@@ -72,6 +76,7 @@ int fun(int arg) {
 #pragma omp target update from(mapper(ab):vv)                           // expected-error {{cannot find a valid user-defined mapper for type 'struct vec' with name 'ab'}} expected-error {{expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'}}
 #pragma omp target update from(mapper(ab):arr[0:2])                     // expected-error {{cannot find a valid user-defined mapper for type 'struct vec' with name 'ab'}} expected-error {{expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'}}
 #pragma omp target update from(mapper(aa) a:vv)                         // expected-warning {{missing ':' after ) - ignoring}}
+#pragma omp target update from(mapper(aa):d)                            // expected-error {{mapper type must be of struct, union or class type}} expected-error {{expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'}}
 #pragma omp target update from(mapper(aa):vv) from(mapper(aa):arr[0])
     }
   }
