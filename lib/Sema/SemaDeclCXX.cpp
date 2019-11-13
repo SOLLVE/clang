@@ -775,6 +775,13 @@ Sema::ActOnDecompositionDeclarator(Scope *S, Declarator &D,
       return nullptr;
   }
 
+  // C++2a [dcl.struct.bind]p1:
+  //   A cv that includes volatile is deprecated
+  if ((DS.getTypeQualifiers() & DeclSpec::TQ_volatile) &&
+      getLangOpts().CPlusPlus2a)
+    Diag(DS.getVolatileSpecLoc(),
+         diag::warn_deprecated_volatile_structured_binding);
+
   TypeSourceInfo *TInfo = GetTypeForDeclarator(D, S);
   QualType R = TInfo->getType();
 
@@ -2479,7 +2486,7 @@ Sema::CheckBaseSpecifier(CXXRecordDecl *Class,
   }
 
   // If the base class is polymorphic or isn't empty, the new one is/isn't, too.
-  RecordDecl *BaseDecl = BaseType->getAs<RecordType>()->getDecl();
+  RecordDecl *BaseDecl = BaseType->castAs<RecordType>()->getDecl();
   assert(BaseDecl && "Record type has no declaration");
   BaseDecl = BaseDecl->getDefinition();
   assert(BaseDecl && "Base type is not incomplete, but has no definition");
@@ -6364,6 +6371,12 @@ void Sema::CheckCompletedCXXClass(CXXRecordDecl *Record) {
         DelayedDllExportMemberFunctions.push_back(M);
       }
     }
+
+    // Define defaulted constexpr virtual functions that override a base class
+    // function right away.
+    // FIXME: We can defer doing this until the vtable is marked as used.
+    if (M->isDefaulted() && M->isConstexpr() && M->size_overridden_methods())
+      DefineImplicitSpecialMember(*this, M, M->getLocation());
   };
 
   bool HasMethodWithOverrideControl = false,
@@ -7998,7 +8011,7 @@ public:
   /// to be used with CXXRecordDecl::lookupInBases().
   bool operator()(const CXXBaseSpecifier *Specifier, CXXBasePath &Path) {
     RecordDecl *BaseRecord =
-        Specifier->getType()->getAs<RecordType>()->getDecl();
+        Specifier->getType()->castAs<RecordType>()->getDecl();
 
     DeclarationName Name = Method->getDeclName();
     assert(Name.getNameKind() == DeclarationName::Identifier);
@@ -11839,7 +11852,8 @@ buildMemcpyForAssignmentOp(Sema &S, SourceLocation Loc, QualType T,
 
   const Type *E = T->getBaseElementTypeUnsafe();
   bool NeedsCollectableMemCpy =
-    E->isRecordType() && E->getAs<RecordType>()->getDecl()->hasObjectMember();
+      E->isRecordType() &&
+      E->castAs<RecordType>()->getDecl()->hasObjectMember();
 
   // Create a reference to the __builtin_objc_memmove_collectable function
   StringRef MemCpyName = NeedsCollectableMemCpy ?
@@ -13392,6 +13406,20 @@ void Sema::FinalizeVarWithDestructor(VarDecl *VD, const RecordType *Record) {
   }
 
   if (Destructor->isTrivial()) return;
+
+  // If the destructor is constexpr, check whether the variable has constant
+  // destruction now.
+  if (Destructor->isConstexpr() && VD->getInit() &&
+      !VD->getInit()->isValueDependent() && VD->evaluateValue()) {
+    SmallVector<PartialDiagnosticAt, 8> Notes;
+    if (!VD->evaluateDestruction(Notes) && VD->isConstexpr()) {
+      Diag(VD->getLocation(),
+           diag::err_constexpr_var_requires_const_destruction) << VD;
+      for (unsigned I = 0, N = Notes.size(); I != N; ++I)
+        Diag(Notes[I].first, Notes[I].second);
+    }
+  }
+
   if (!VD->hasGlobalStorage()) return;
 
   // Emit warning for non-trivial dtor in global scope (a real global,
@@ -15515,8 +15543,8 @@ void Sema::MarkVirtualMembersReferenced(SourceLocation Loc,
     return;
 
   for (const auto &I : RD->bases()) {
-    const CXXRecordDecl *Base =
-        cast<CXXRecordDecl>(I.getType()->getAs<RecordType>()->getDecl());
+    const auto *Base =
+        cast<CXXRecordDecl>(I.getType()->castAs<RecordType>()->getDecl());
     if (Base->getNumVBases() == 0)
       continue;
     MarkVirtualMembersReferenced(Loc, Base);

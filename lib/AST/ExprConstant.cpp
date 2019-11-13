@@ -66,8 +66,6 @@ using llvm::APSInt;
 using llvm::APFloat;
 using llvm::Optional;
 
-static bool IsGlobalLValue(APValue::LValueBase B);
-
 namespace {
   struct LValue;
   class CallStackFrame;
@@ -97,6 +95,9 @@ namespace {
 
     if (B.is<TypeInfoLValue>())
       return B.getTypeInfoType();
+
+    if (B.is<DynamicAllocLValue>())
+      return B.getDynamicAllocType();
 
     const Expr *Base = B.get<const Expr*>();
 
@@ -136,7 +137,7 @@ namespace {
 
   /// Given an expression, determine the type used to store the result of
   /// evaluating that expression.
-  static QualType getStorageType(ASTContext &Ctx, Expr *E) {
+  static QualType getStorageType(const ASTContext &Ctx, const Expr *E) {
     if (E->isRValue())
       return E->getType();
     return Ctx.getLValueReferenceType(E->getType());
@@ -593,6 +594,13 @@ namespace {
     Frame *getCaller() const override { return Caller; }
     SourceLocation getCallLocation() const override { return CallLoc; }
     const FunctionDecl *getCallee() const override { return Callee; }
+
+    bool isStdFunction() const {
+      for (const DeclContext *DC = Callee; DC; DC = DC->getParent())
+        if (DC->isStdNamespace())
+          return true;
+      return false;
+    }
   };
 
   /// Temporarily override 'this'.
@@ -612,8 +620,11 @@ namespace {
   };
 }
 
-static bool HandleDestructorCall(EvalInfo &Info, APValue::LValueBase LVBase,
-                                 APValue &Value, QualType T);
+static bool HandleDestruction(EvalInfo &Info, const Expr *E,
+                              const LValue &This, QualType ThisType);
+static bool HandleDestruction(EvalInfo &Info, SourceLocation Loc,
+                              APValue::LValueBase LVBase, APValue &Value,
+                              QualType T);
 
 namespace {
   /// A cleanup, and a flag indicating whether it is lifetime-extended.
@@ -629,8 +640,14 @@ namespace {
 
     bool isLifetimeExtended() const { return Value.getInt(); }
     bool endLifetime(EvalInfo &Info, bool RunDestructors) {
-      if (RunDestructors && T.isDestructedType())
-        return HandleDestructorCall(Info, Base, *Value.getPointer(), T);
+      if (RunDestructors) {
+        SourceLocation Loc;
+        if (const ValueDecl *VD = Base.dyn_cast<const ValueDecl*>())
+          Loc = VD->getLocation();
+        else if (const Expr *E = Base.dyn_cast<const Expr*>())
+          Loc = E->getExprLoc();
+        return HandleDestruction(Info, Loc, Base, *Value.getPointer(), T);
+      }
       *Value.getPointer() = APValue();
       return true;
     }
@@ -680,6 +697,37 @@ template<> struct DenseMapInfo<ObjectUnderConstruction> {
 }
 
 namespace {
+  /// A dynamically-allocated heap object.
+  struct DynAlloc {
+    /// The value of this heap-allocated object.
+    APValue Value;
+    /// The allocating expression; used for diagnostics. Either a CXXNewExpr
+    /// or a CallExpr (the latter is for direct calls to operator new inside
+    /// std::allocator<T>::allocate).
+    const Expr *AllocExpr = nullptr;
+
+    enum Kind {
+      New,
+      ArrayNew,
+      StdAllocator
+    };
+
+    /// Get the kind of the allocation. This must match between allocation
+    /// and deallocation.
+    Kind getKind() const {
+      if (auto *NE = dyn_cast<CXXNewExpr>(AllocExpr))
+        return NE->isArray() ? ArrayNew : New;
+      assert(isa<CallExpr>(AllocExpr));
+      return StdAllocator;
+    }
+  };
+
+  struct DynAllocOrder {
+    bool operator()(DynamicAllocLValue L, DynamicAllocLValue R) const {
+      return L.getIndex() < R.getIndex();
+    }
+  };
+
   /// EvalInfo - This is a private struct used by the evaluator to capture
   /// information about a subexpression as it is folded.  It retains information
   /// about the AST context, but also maintains information about the folded
@@ -734,6 +782,15 @@ namespace {
     /// evaluated, if any.
     APValue::LValueBase EvaluatingDecl;
 
+    enum class EvaluatingDeclKind {
+      None,
+      /// We're evaluating the construction of EvaluatingDecl.
+      Ctor,
+      /// We're evaluating the destruction of EvaluatingDecl.
+      Dtor,
+    };
+    EvaluatingDeclKind IsEvaluatingDecl = EvaluatingDeclKind::None;
+
     /// EvaluatingDeclValue - This is the value being constructed for the
     /// declaration whose initializer is being evaluated, if any.
     APValue *EvaluatingDeclValue;
@@ -741,6 +798,14 @@ namespace {
     /// Set of objects that are currently being constructed.
     llvm::DenseMap<ObjectUnderConstruction, ConstructionPhase>
         ObjectsUnderConstruction;
+
+    /// Current heap allocations, along with the location where each was
+    /// allocated. We use std::map here because we need stable addresses
+    /// for the stored APValues.
+    std::map<DynamicAllocLValue, DynAlloc, DynAllocOrder> HeapAllocs;
+
+    /// The number of heap allocations performed so far in this evaluation.
+    unsigned NumHeapAllocs = 0;
 
     struct EvaluatingConstructorRAII {
       EvalInfo &EI;
@@ -766,20 +831,20 @@ namespace {
     struct EvaluatingDestructorRAII {
       EvalInfo &EI;
       ObjectUnderConstruction Object;
+      bool DidInsert;
       EvaluatingDestructorRAII(EvalInfo &EI, ObjectUnderConstruction Object)
           : EI(EI), Object(Object) {
-        bool DidInsert = EI.ObjectsUnderConstruction
-                             .insert({Object, ConstructionPhase::Destroying})
-                             .second;
-        (void)DidInsert;
-        assert(DidInsert && "destroyed object multiple times");
+        DidInsert = EI.ObjectsUnderConstruction
+                        .insert({Object, ConstructionPhase::Destroying})
+                        .second;
       }
       void startedDestroyingBases() {
         EI.ObjectsUnderConstruction[Object] =
             ConstructionPhase::DestroyingBases;
       }
       ~EvaluatingDestructorRAII() {
-        EI.ObjectsUnderConstruction.erase(Object);
+        if (DidInsert)
+          EI.ObjectsUnderConstruction.erase(Object);
       }
     };
 
@@ -870,8 +935,10 @@ namespace {
       discardCleanups();
     }
 
-    void setEvaluatingDecl(APValue::LValueBase Base, APValue &Value) {
+    void setEvaluatingDecl(APValue::LValueBase Base, APValue &Value,
+                           EvaluatingDeclKind EDK = EvaluatingDeclKind::Ctor) {
       EvaluatingDecl = Base;
+      IsEvaluatingDecl = EDK;
       EvaluatingDeclValue = &Value;
     }
 
@@ -915,6 +982,49 @@ namespace {
       }
       --StepsLeft;
       return true;
+    }
+
+    APValue *createHeapAlloc(const Expr *E, QualType T, LValue &LV);
+
+    Optional<DynAlloc*> lookupDynamicAlloc(DynamicAllocLValue DA) {
+      Optional<DynAlloc*> Result;
+      auto It = HeapAllocs.find(DA);
+      if (It != HeapAllocs.end())
+        Result = &It->second;
+      return Result;
+    }
+
+    /// Information about a stack frame for std::allocator<T>::[de]allocate.
+    struct StdAllocatorCaller {
+      unsigned FrameIndex;
+      QualType ElemType;
+      explicit operator bool() const { return FrameIndex != 0; };
+    };
+
+    StdAllocatorCaller getStdAllocatorCaller(StringRef FnName) const {
+      for (const CallStackFrame *Call = CurrentCall; Call != &BottomFrame;
+           Call = Call->Caller) {
+        const auto *MD = dyn_cast_or_null<CXXMethodDecl>(Call->Callee);
+        if (!MD)
+          continue;
+        const IdentifierInfo *FnII = MD->getIdentifier();
+        if (!FnII || !FnII->isStr(FnName))
+          continue;
+
+        const auto *CTSD =
+            dyn_cast<ClassTemplateSpecializationDecl>(MD->getParent());
+        if (!CTSD)
+          continue;
+
+        const IdentifierInfo *ClassII = CTSD->getIdentifier();
+        const TemplateArgumentList &TAL = CTSD->getTemplateArgs();
+        if (CTSD->isInStdNamespace() && ClassII &&
+            ClassII->isStr("allocator") && TAL.size() >= 1 &&
+            TAL[0].getKind() == TemplateArgument::Type)
+          return {Call->Index, TAL[0].getAsType()};
+      }
+
+      return {};
     }
 
     void performLifetimeExtension() {
@@ -1192,13 +1302,21 @@ namespace {
       Info.CurrentCall->popTempVersion();
     }
   private:
-    static bool cleanup(EvalInfo &Info, bool RunDestructors, unsigned OldStackSize) {
+    static bool cleanup(EvalInfo &Info, bool RunDestructors,
+                        unsigned OldStackSize) {
+      assert(OldStackSize <= Info.CleanupStack.size() &&
+             "running cleanups out of order?");
+
       // Run all cleanups for a block scope, and non-lifetime-extended cleanups
       // for a full-expression scope.
+      bool Success = true;
       for (unsigned I = Info.CleanupStack.size(); I > OldStackSize; --I) {
-        if (!(IsFullExpression && Info.CleanupStack[I-1].isLifetimeExtended())) {
-          if (!Info.CleanupStack[I-1].endLifetime(Info, RunDestructors))
-            return false;
+        if (!(IsFullExpression &&
+              Info.CleanupStack[I - 1].isLifetimeExtended())) {
+          if (!Info.CleanupStack[I - 1].endLifetime(Info, RunDestructors)) {
+            Success = false;
+            break;
+          }
         }
       }
 
@@ -1209,7 +1327,7 @@ namespace {
             std::remove_if(NewEnd, Info.CleanupStack.end(),
                            [](Cleanup &C) { return !C.isLifetimeExtended(); });
       Info.CleanupStack.erase(NewEnd, Info.CleanupStack.end());
-      return true;
+      return Success;
     }
   };
   typedef ScopeRAII<false> BlockScopeRAII;
@@ -1284,14 +1402,20 @@ static bool isModification(AccessKinds AK) {
   case AK_Assign:
   case AK_Increment:
   case AK_Decrement:
+  case AK_Construct:
+  case AK_Destroy:
     return true;
   }
   llvm_unreachable("unknown access kind");
 }
 
+static bool isAnyAccess(AccessKinds AK) {
+  return isRead(AK) || isModification(AK);
+}
+
 /// Is this an access per the C++ definition?
 static bool isFormalAccess(AccessKinds AK) {
-  return isRead(AK) || isModification(AK);
+  return isAnyAccess(AK) && AK != AK_Construct && AK != AK_Destroy;
 }
 
 namespace {
@@ -1387,9 +1511,10 @@ namespace {
       IsNullPtr = false;
     }
 
-    void setNull(QualType PointerTy, uint64_t TargetVal) {
+    void setNull(ASTContext &Ctx, QualType PointerTy) {
       Base = (Expr *)nullptr;
-      Offset = CharUnits::fromQuantity(TargetVal);
+      Offset =
+          CharUnits::fromQuantity(Ctx.getTargetNullPointerValue(PointerTy));
       InvalidBase = false;
       Designator = SubobjectDesignator(PointerTy->getPointeeType());
       IsNullPtr = true;
@@ -1397,6 +1522,12 @@ namespace {
 
     void setInvalid(APValue::LValueBase B, unsigned I = 0) {
       set(B, true);
+    }
+
+    std::string toString(ASTContext &Ctx, QualType T) const {
+      APValue Printable;
+      moveInto(Printable);
+      return Printable.getAsString(Ctx, T);
     }
 
   private:
@@ -1634,13 +1765,38 @@ static void negateAsSigned(APSInt &Int) {
 template<typename KeyT>
 APValue &CallStackFrame::createTemporary(const KeyT *Key, QualType T,
                                          bool IsLifetimeExtended, LValue &LV) {
-  unsigned Version = Info.CurrentCall->getTempVersion();
+  unsigned Version = getTempVersion();
   APValue::LValueBase Base(Key, Index, Version);
   LV.set(Base);
   APValue &Result = Temporaries[MapKeyTy(Key, Version)];
   assert(Result.isAbsent() && "temporary created multiple times");
-  Info.CleanupStack.push_back(Cleanup(&Result, Base, T, IsLifetimeExtended));
+
+  // If we're creating a temporary immediately in the operand of a speculative
+  // evaluation, don't register a cleanup to be run outside the speculative
+  // evaluation context, since we won't actually be able to initialize this
+  // object.
+  if (Index <= Info.SpeculativeEvaluationDepth) {
+    if (T.isDestructedType())
+      Info.noteSideEffect();
+  } else {
+    Info.CleanupStack.push_back(Cleanup(&Result, Base, T, IsLifetimeExtended));
+  }
   return Result;
+}
+
+APValue *EvalInfo::createHeapAlloc(const Expr *E, QualType T, LValue &LV) {
+  if (NumHeapAllocs > DynamicAllocLValue::getMaxIndex()) {
+    FFDiag(E, diag::note_constexpr_heap_alloc_limit_exceeded);
+    return nullptr;
+  }
+
+  DynamicAllocLValue DA(NumHeapAllocs++);
+  LV.set(APValue::LValueBase::getDynamicAlloc(DA, T));
+  auto Result = HeapAllocs.emplace(std::piecewise_construct,
+                                   std::forward_as_tuple(DA), std::tuple<>());
+  assert(Result.second && "reused a heap alloc index?");
+  Result.first->second.AllocExpr = E;
+  return &Result.first->second.Value;
 }
 
 /// Produce a string describing the given constexpr call.
@@ -1713,7 +1869,7 @@ static bool IsGlobalLValue(APValue::LValueBase B) {
     return isa<FunctionDecl>(D);
   }
 
-  if (B.is<TypeInfoLValue>())
+  if (B.is<TypeInfoLValue>() || B.is<DynamicAllocLValue>())
     return true;
 
   const Expr *E = B.get<const Expr*>();
@@ -1812,15 +1968,39 @@ static void NoteLValueLocation(EvalInfo &Info, APValue::LValueBase Base) {
     Info.Note(VD->getLocation(), diag::note_declared_at);
   else if (const Expr *E = Base.dyn_cast<const Expr*>())
     Info.Note(E->getExprLoc(), diag::note_constexpr_temporary_here);
+  else if (DynamicAllocLValue DA = Base.dyn_cast<DynamicAllocLValue>()) {
+    // FIXME: Produce a note for dangling pointers too.
+    if (Optional<DynAlloc*> Alloc = Info.lookupDynamicAlloc(DA))
+      Info.Note((*Alloc)->AllocExpr->getExprLoc(),
+                diag::note_constexpr_dynamic_alloc_here);
+  }
   // We have no information to show for a typeid(T) object.
 }
+
+enum class CheckEvaluationResultKind {
+  ConstantExpression,
+  FullyInitialized,
+};
+
+/// Materialized temporaries that we've already checked to determine if they're
+/// initializsed by a constant expression.
+using CheckedTemporaries =
+    llvm::SmallPtrSet<const MaterializeTemporaryExpr *, 8>;
+
+static bool CheckEvaluationResult(CheckEvaluationResultKind CERK,
+                                  EvalInfo &Info, SourceLocation DiagLoc,
+                                  QualType Type, const APValue &Value,
+                                  Expr::ConstExprUsage Usage,
+                                  SourceLocation SubobjectLoc,
+                                  CheckedTemporaries &CheckedTemps);
 
 /// Check that this reference or pointer core constant expression is a valid
 /// value for an address or reference constant expression. Return true if we
 /// can fold this expression, whether or not it's a constant expression.
 static bool CheckLValueConstantExpression(EvalInfo &Info, SourceLocation Loc,
                                           QualType Type, const LValue &LVal,
-                                          Expr::ConstExprUsage Usage) {
+                                          Expr::ConstExprUsage Usage,
+                                          CheckedTemporaries &CheckedTemps) {
   bool IsReferenceType = Type->isReferenceType();
 
   APValue::LValueBase Base = LVal.getLValueBase();
@@ -1846,14 +2026,23 @@ static bool CheckLValueConstantExpression(EvalInfo &Info, SourceLocation Loc,
           LVal.getLValueCallIndex() == 0) &&
          "have call index for global lvalue");
 
+  if (Base.is<DynamicAllocLValue>()) {
+    Info.FFDiag(Loc, diag::note_constexpr_dynamic_alloc)
+        << IsReferenceType << !Designator.Entries.empty();
+    NoteLValueLocation(Info, Base);
+    return false;
+  }
+
   if (const ValueDecl *VD = Base.dyn_cast<const ValueDecl*>()) {
     if (const VarDecl *Var = dyn_cast<const VarDecl>(VD)) {
       // Check if this is a thread-local variable.
       if (Var->getTLSKind())
+        // FIXME: Diagnostic!
         return false;
 
       // A dllimport variable never acts like a constant.
       if (Usage == Expr::EvaluateForCodeGen && Var->hasAttr<DLLImportAttr>())
+        // FIXME: Diagnostic!
         return false;
     }
     if (const auto *FD = dyn_cast<const FunctionDecl>(VD)) {
@@ -1869,6 +2058,25 @@ static bool CheckLValueConstantExpression(EvalInfo &Info, SourceLocation Loc,
       // perform initialization with the address of the thunk.
       if (Info.getLangOpts().CPlusPlus && Usage == Expr::EvaluateForCodeGen &&
           FD->hasAttr<DLLImportAttr>())
+        // FIXME: Diagnostic!
+        return false;
+    }
+  } else if (const auto *MTE = dyn_cast_or_null<MaterializeTemporaryExpr>(
+                 Base.dyn_cast<const Expr *>())) {
+    if (CheckedTemps.insert(MTE).second) {
+      QualType TempType = getType(Base);
+      if (TempType.isDestructedType()) {
+        Info.FFDiag(MTE->getExprLoc(),
+                    diag::note_constexpr_unsupported_tempoarary_nontrivial_dtor)
+            << TempType;
+        return false;
+      }
+
+      APValue *V = Info.Ctx.getMaterializedTemporaryValue(MTE, false);
+      assert(V && "evasluation result refers to uninitialised temporary");
+      if (!CheckEvaluationResult(CheckEvaluationResultKind::ConstantExpression,
+                                 Info, MTE->getExprLoc(), TempType, *V,
+                                 Usage, SourceLocation(), CheckedTemps))
         return false;
     }
   }
@@ -1943,16 +2151,12 @@ static bool CheckLiteralType(EvalInfo &Info, const Expr *E,
   return false;
 }
 
-enum class CheckEvaluationResultKind {
-  ConstantExpression,
-  FullyInitialized,
-};
-
-static bool
-CheckEvaluationResult(CheckEvaluationResultKind CERK, EvalInfo &Info,
-                      SourceLocation DiagLoc, QualType Type,
-                      const APValue &Value, Expr::ConstExprUsage Usage,
-                      SourceLocation SubobjectLoc = SourceLocation()) {
+static bool CheckEvaluationResult(CheckEvaluationResultKind CERK,
+                                  EvalInfo &Info, SourceLocation DiagLoc,
+                                  QualType Type, const APValue &Value,
+                                  Expr::ConstExprUsage Usage,
+                                  SourceLocation SubobjectLoc,
+                                  CheckedTemporaries &CheckedTemps) {
   if (!Value.hasValue()) {
     Info.FFDiag(DiagLoc, diag::note_constexpr_uninitialized)
       << true << Type;
@@ -1974,18 +2178,20 @@ CheckEvaluationResult(CheckEvaluationResultKind CERK, EvalInfo &Info,
     for (unsigned I = 0, N = Value.getArrayInitializedElts(); I != N; ++I) {
       if (!CheckEvaluationResult(CERK, Info, DiagLoc, EltTy,
                                  Value.getArrayInitializedElt(I), Usage,
-                                 SubobjectLoc))
+                                 SubobjectLoc, CheckedTemps))
         return false;
     }
     if (!Value.hasArrayFiller())
       return true;
     return CheckEvaluationResult(CERK, Info, DiagLoc, EltTy,
-                                 Value.getArrayFiller(), Usage, SubobjectLoc);
+                                 Value.getArrayFiller(), Usage, SubobjectLoc,
+                                 CheckedTemps);
   }
   if (Value.isUnion() && Value.getUnionField()) {
     return CheckEvaluationResult(
         CERK, Info, DiagLoc, Value.getUnionField()->getType(),
-        Value.getUnionValue(), Usage, Value.getUnionField()->getLocation());
+        Value.getUnionValue(), Usage, Value.getUnionField()->getLocation(),
+        CheckedTemps);
   }
   if (Value.isStruct()) {
     RecordDecl *RD = Type->castAs<RecordType>()->getDecl();
@@ -1994,7 +2200,7 @@ CheckEvaluationResult(CheckEvaluationResultKind CERK, EvalInfo &Info,
       for (const CXXBaseSpecifier &BS : CD->bases()) {
         if (!CheckEvaluationResult(CERK, Info, DiagLoc, BS.getType(),
                                    Value.getStructBase(BaseIndex), Usage,
-                                   BS.getBeginLoc()))
+                                   BS.getBeginLoc(), CheckedTemps))
           return false;
         ++BaseIndex;
       }
@@ -2005,7 +2211,7 @@ CheckEvaluationResult(CheckEvaluationResultKind CERK, EvalInfo &Info,
 
       if (!CheckEvaluationResult(CERK, Info, DiagLoc, I->getType(),
                                  Value.getStructField(I->getFieldIndex()),
-                                 Usage, I->getLocation()))
+                                 Usage, I->getLocation(), CheckedTemps))
         return false;
     }
   }
@@ -2014,7 +2220,8 @@ CheckEvaluationResult(CheckEvaluationResultKind CERK, EvalInfo &Info,
       CERK == CheckEvaluationResultKind::ConstantExpression) {
     LValue LVal;
     LVal.setFrom(Info.Ctx, Value);
-    return CheckLValueConstantExpression(Info, DiagLoc, Type, LVal, Usage);
+    return CheckLValueConstantExpression(Info, DiagLoc, Type, LVal, Usage,
+                                         CheckedTemps);
   }
 
   if (Value.isMemberPointer() &&
@@ -2032,17 +2239,34 @@ static bool
 CheckConstantExpression(EvalInfo &Info, SourceLocation DiagLoc, QualType Type,
                         const APValue &Value,
                         Expr::ConstExprUsage Usage = Expr::EvaluateForCodeGen) {
+  CheckedTemporaries CheckedTemps;
   return CheckEvaluationResult(CheckEvaluationResultKind::ConstantExpression,
-                               Info, DiagLoc, Type, Value, Usage);
+                               Info, DiagLoc, Type, Value, Usage,
+                               SourceLocation(), CheckedTemps);
 }
 
 /// Check that this evaluated value is fully-initialized and can be loaded by
 /// an lvalue-to-rvalue conversion.
 static bool CheckFullyInitialized(EvalInfo &Info, SourceLocation DiagLoc,
                                   QualType Type, const APValue &Value) {
-  return CheckEvaluationResult(CheckEvaluationResultKind::FullyInitialized,
-                               Info, DiagLoc, Type, Value,
-                               Expr::EvaluateForCodeGen);
+  CheckedTemporaries CheckedTemps;
+  return CheckEvaluationResult(
+      CheckEvaluationResultKind::FullyInitialized, Info, DiagLoc, Type, Value,
+      Expr::EvaluateForCodeGen, SourceLocation(), CheckedTemps);
+}
+
+/// Enforce C++2a [expr.const]/4.17, which disallows new-expressions unless
+/// "the allocated storage is deallocated within the evaluation".
+static bool CheckMemoryLeaks(EvalInfo &Info) {
+  if (!Info.HeapAllocs.empty()) {
+    // We can still fold to a constant despite a compile-time memory leak,
+    // so long as the heap allocation isn't referenced in the result (we check
+    // that in CheckConstantExpression).
+    Info.CCEDiag(Info.HeapAllocs.begin()->second.AllocExpr,
+                 diag::note_constexpr_memory_leak)
+        << unsigned(Info.HeapAllocs.size() - 1);
+  }
+  return true;
 }
 
 static bool EvalPointerValueAsBool(const APValue &Value, bool &Result) {
@@ -2736,9 +2960,10 @@ static APSInt extractStringLiteralCharacter(EvalInfo &Info, const Expr *Lit,
 // FIXME: This is inefficient; we should probably introduce something similar
 // to the LLVM ConstantDataArray to make this cheaper.
 static void expandStringLiteral(EvalInfo &Info, const StringLiteral *S,
-                                APValue &Result) {
-  const ConstantArrayType *CAT =
-      Info.Ctx.getAsConstantArrayType(S->getType());
+                                APValue &Result,
+                                QualType AllocType = QualType()) {
+  const ConstantArrayType *CAT = Info.Ctx.getAsConstantArrayType(
+      AllocType.isNull() ? S->getType() : AllocType);
   assert(CAT && "string literal isn't an array");
   QualType CharType = CAT->getElementType();
   assert(CharType->isIntegerType() && "unexpected character type");
@@ -2802,8 +3027,8 @@ static bool isReadByLvalueToRvalueConversion(QualType T) {
 
 /// Diagnose an attempt to read from any unreadable field within the specified
 /// type, which might be a class type.
-static bool diagnoseUnreadableFields(EvalInfo &Info, const Expr *E,
-                                     QualType T) {
+static bool diagnoseMutableFields(EvalInfo &Info, const Expr *E, AccessKinds AK,
+                                  QualType T) {
   CXXRecordDecl *RD = T->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
   if (!RD)
     return false;
@@ -2818,17 +3043,17 @@ static bool diagnoseUnreadableFields(EvalInfo &Info, const Expr *E,
     // FIXME: Add core issue number for the union case.
     if (Field->isMutable() &&
         (RD->isUnion() || isReadByLvalueToRvalueConversion(Field->getType()))) {
-      Info.FFDiag(E, diag::note_constexpr_ltor_mutable, 1) << Field;
+      Info.FFDiag(E, diag::note_constexpr_access_mutable, 1) << AK << Field;
       Info.Note(Field->getLocation(), diag::note_declared_at);
       return true;
     }
 
-    if (diagnoseUnreadableFields(Info, E, Field->getType()))
+    if (diagnoseMutableFields(Info, E, AK, Field->getType()))
       return true;
   }
 
   for (auto &BaseSpec : RD->bases())
-    if (diagnoseUnreadableFields(Info, E, BaseSpec.getType()))
+    if (diagnoseMutableFields(Info, E, AK, BaseSpec.getType()))
       return true;
 
   // All mutable fields were empty, and thus not actually read.
@@ -2836,7 +3061,8 @@ static bool diagnoseUnreadableFields(EvalInfo &Info, const Expr *E,
 }
 
 static bool lifetimeStartedInEvaluation(EvalInfo &Info,
-                                        APValue::LValueBase Base) {
+                                        APValue::LValueBase Base,
+                                        bool MutableSubobject = false) {
   // A temporary we created.
   if (Base.getCallIndex())
     return true;
@@ -2845,19 +3071,42 @@ static bool lifetimeStartedInEvaluation(EvalInfo &Info,
   if (!Evaluating)
     return false;
 
-  // The variable whose initializer we're evaluating.
-  if (auto *BaseD = Base.dyn_cast<const ValueDecl*>())
-    if (declaresSameEntity(Evaluating, BaseD))
-      return true;
+  auto *BaseD = Base.dyn_cast<const ValueDecl*>();
 
-  // A temporary lifetime-extended by the variable whose initializer we're
-  // evaluating.
-  if (auto *BaseE = Base.dyn_cast<const Expr *>())
-    if (auto *BaseMTE = dyn_cast<MaterializeTemporaryExpr>(BaseE))
-      if (declaresSameEntity(BaseMTE->getExtendingDecl(), Evaluating))
-        return true;
+  switch (Info.IsEvaluatingDecl) {
+  case EvalInfo::EvaluatingDeclKind::None:
+    return false;
 
-  return false;
+  case EvalInfo::EvaluatingDeclKind::Ctor:
+    // The variable whose initializer we're evaluating.
+    if (BaseD)
+      return declaresSameEntity(Evaluating, BaseD);
+
+    // A temporary lifetime-extended by the variable whose initializer we're
+    // evaluating.
+    if (auto *BaseE = Base.dyn_cast<const Expr *>())
+      if (auto *BaseMTE = dyn_cast<MaterializeTemporaryExpr>(BaseE))
+        return declaresSameEntity(BaseMTE->getExtendingDecl(), Evaluating);
+    return false;
+
+  case EvalInfo::EvaluatingDeclKind::Dtor:
+    // C++2a [expr.const]p6:
+    //   [during constant destruction] the lifetime of a and its non-mutable
+    //   subobjects (but not its mutable subobjects) [are] considered to start
+    //   within e.
+    //
+    // FIXME: We can meaningfully extend this to cover non-const objects, but
+    // we will need special handling: we should be able to access only
+    // subobjects of such objects that are themselves declared const.
+    if (!BaseD ||
+        !(BaseD->getType().isConstQualified() ||
+          BaseD->getType()->isReferenceType()) ||
+        MutableSubobject)
+      return false;
+    return declaresSameEntity(Evaluating, BaseD);
+  }
+
+  llvm_unreachable("unknown evaluating decl kind");
 }
 
 namespace {
@@ -2875,13 +3124,13 @@ struct CompleteObject {
   CompleteObject(APValue::LValueBase Base, APValue *Value, QualType Type)
       : Base(Base), Value(Value), Type(Type) {}
 
-  bool mayReadMutableMembers(EvalInfo &Info) const {
+  bool mayAccessMutableMembers(EvalInfo &Info, AccessKinds AK) const {
     // In C++14 onwards, it is permitted to read a mutable member whose
     // lifetime began within the evaluation.
     // FIXME: Should we also allow this in C++11?
     if (!Info.getLangOpts().CPlusPlus14)
       return false;
-    return lifetimeStartedInEvaluation(Info, Base);
+    return lifetimeStartedInEvaluation(Info, Base, /*MutableSubobject*/true);
   }
 
   explicit operator bool() const { return !Type.isNull(); }
@@ -2929,8 +3178,9 @@ findSubobject(EvalInfo &Info, const Expr *E, const CompleteObject &Obj,
   // Walk the designator's path to find the subobject.
   for (unsigned I = 0, N = Sub.Entries.size(); /**/; ++I) {
     // Reading an indeterminate value is undefined, but assigning over one is OK.
-    if (O->isAbsent() ||
-        (O->isIndeterminate() && handler.AccessKind != AK_Assign &&
+    if ((O->isAbsent() && !(handler.AccessKind == AK_Construct && I == N)) ||
+        (O->isIndeterminate() && handler.AccessKind != AK_Construct &&
+         handler.AccessKind != AK_Assign &&
          handler.AccessKind != AK_ReadObjectRepresentation)) {
       if (!Info.checkingPotentialConstantExpression())
         Info.FFDiag(E, diag::note_constexpr_access_uninit)
@@ -2986,9 +3236,9 @@ findSubobject(EvalInfo &Info, const Expr *E, const CompleteObject &Obj,
       // things we need to check: if there are any mutable subobjects, we
       // cannot perform this read. (This only happens when performing a trivial
       // copy or assignment.)
-      if (ObjType->isRecordType() && isRead(handler.AccessKind) &&
-          !Obj.mayReadMutableMembers(Info) &&
-          diagnoseUnreadableFields(Info, E, ObjType))
+      if (ObjType->isRecordType() &&
+          !Obj.mayAccessMutableMembers(Info, handler.AccessKind) &&
+          diagnoseMutableFields(Info, E, handler.AccessKind, ObjType))
         return handler.failed();
     }
 
@@ -3056,10 +3306,10 @@ findSubobject(EvalInfo &Info, const Expr *E, const CompleteObject &Obj,
                                    : O->getComplexFloatReal(), ObjType);
       }
     } else if (const FieldDecl *Field = getAsField(Sub.Entries[I])) {
-      if (Field->isMutable() && isRead(handler.AccessKind) &&
-          !Obj.mayReadMutableMembers(Info)) {
-        Info.FFDiag(E, diag::note_constexpr_ltor_mutable, 1)
-          << Field;
+      if (Field->isMutable() &&
+          !Obj.mayAccessMutableMembers(Info, handler.AccessKind)) {
+        Info.FFDiag(E, diag::note_constexpr_access_mutable, 1)
+          << handler.AccessKind << Field;
         Info.Note(Field->getLocation(), diag::note_declared_at);
         return handler.failed();
       }
@@ -3070,9 +3320,18 @@ findSubobject(EvalInfo &Info, const Expr *E, const CompleteObject &Obj,
         const FieldDecl *UnionField = O->getUnionField();
         if (!UnionField ||
             UnionField->getCanonicalDecl() != Field->getCanonicalDecl()) {
-          Info.FFDiag(E, diag::note_constexpr_access_inactive_union_member)
-            << handler.AccessKind << Field << !UnionField << UnionField;
-          return handler.failed();
+          if (I == N - 1 && handler.AccessKind == AK_Construct) {
+            // Placement new onto an inactive union member makes it active.
+            O->setUnion(Field, APValue());
+          } else {
+            // FIXME: If O->getUnionValue() is absent, report that there's no
+            // active union member rather than reporting the prior active union
+            // member. We'll need to fix nullptr_t to not use APValue() as its
+            // representation first.
+            Info.FFDiag(E, diag::note_constexpr_access_inactive_union_member)
+                << handler.AccessKind << Field << !UnionField << UnionField;
+            return handler.failed();
+          }
         }
         O = &O->getUnionValue();
       } else
@@ -3271,13 +3530,13 @@ static CompleteObject findCompleteObject(EvalInfo &Info, const Expr *E,
     }
   }
 
-  bool IsAccess = isFormalAccess(AK);
+  bool IsAccess = isAnyAccess(AK);
 
   // C++11 DR1311: An lvalue-to-rvalue conversion on a volatile-qualified type
   // is not a constant expression (even if the object is non-volatile). We also
   // apply this rule to C++98, in order to conform to the expected 'volatile'
   // semantics.
-  if (IsAccess && LValType.isVolatileQualified()) {
+  if (isFormalAccess(AK) && LValType.isVolatileQualified()) {
     if (Info.getLangOpts().CPlusPlus)
       Info.FFDiag(E, diag::note_constexpr_access_volatile_type)
         << AK << LValType;
@@ -3312,8 +3571,7 @@ static CompleteObject findCompleteObject(EvalInfo &Info, const Expr *E,
     // the variable we're reading must be const.
     if (!Frame) {
       if (Info.getLangOpts().CPlusPlus14 &&
-          declaresSameEntity(
-              VD, Info.EvaluatingDecl.dyn_cast<const ValueDecl *>())) {
+          lifetimeStartedInEvaluation(Info, LVal.Base)) {
         // OK, we can read and modify an object if we're in the process of
         // evaluating its initializer, because its lifetime began in this
         // evaluation.
@@ -3372,6 +3630,14 @@ static CompleteObject findCompleteObject(EvalInfo &Info, const Expr *E,
 
     if (!evaluateVarDeclInit(Info, E, VD, Frame, BaseVal, &LVal))
       return CompleteObject();
+  } else if (DynamicAllocLValue DA = LVal.Base.dyn_cast<DynamicAllocLValue>()) {
+    Optional<DynAlloc*> Alloc = Info.lookupDynamicAlloc(DA);
+    if (!Alloc) {
+      Info.FFDiag(E, diag::note_constexpr_access_deleted_object) << AK;
+      return CompleteObject();
+    }
+    return CompleteObject(LVal.Base, &(*Alloc)->Value,
+                          LVal.Base.getDynamicAllocType());
   } else {
     const Expr *Base = LVal.Base.dyn_cast<const Expr*>();
 
@@ -3395,11 +3661,14 @@ static CompleteObject findCompleteObject(EvalInfo &Info, const Expr *E,
         //   int x = ++r;
         //   constexpr int k = r;
         // Therefore we use the C++14 rules in C++11 too.
-        const ValueDecl *VD = Info.EvaluatingDecl.dyn_cast<const ValueDecl*>();
-        const ValueDecl *ED = MTE->getExtendingDecl();
+        //
+        // Note that temporaries whose lifetimes began while evaluating a
+        // variable's constructor are not usable while evaluating the
+        // corresponding destructor, not even if they're of const-qualified
+        // types.
         if (!(BaseType.isConstQualified() &&
               BaseType->isIntegralOrEnumerationType()) &&
-            !(VD && VD->getCanonicalDecl() == ED->getCanonicalDecl())) {
+            !lifetimeStartedInEvaluation(Info, LVal.Base)) {
           if (!IsAccess)
             return CompleteObject(LVal.getLValueBase(), nullptr, BaseType);
           Info.FFDiag(E, diag::note_constexpr_access_static_temporary, 1) << AK;
@@ -3799,7 +4068,7 @@ static bool handleIncDec(EvalInfo &Info, const Expr *E, const LValue &LVal,
 /// Build an lvalue for the object argument of a member function call.
 static bool EvaluateObjectArgument(EvalInfo &Info, const Expr *Object,
                                    LValue &This) {
-  if (Object->getType()->isPointerType())
+  if (Object->getType()->isPointerType() && Object->isRValue())
     return EvaluatePointer(Object, This, Info);
 
   if (Object->isGLValue())
@@ -4166,7 +4435,7 @@ static EvalStmtResult EvaluateSwitch(StmtResult &Result, EvalInfo &Info,
   }
 
   if (!Found)
-    return Scope.destroy() ? ESR_Failed : ESR_Succeeded;
+    return Scope.destroy() ? ESR_Succeeded : ESR_Failed;
 
   // Search the switch body for the switch case and evaluate it from there.
   EvalStmtResult ESR = EvaluateStmt(Result, Info, SS->getBody(), Found);
@@ -4728,9 +4997,13 @@ static bool checkDynamicType(EvalInfo &Info, const Expr *E, const LValue &This,
 
 /// Check that the pointee of the 'this' pointer in a member function call is
 /// either within its lifetime or in its period of construction or destruction.
-static bool checkNonVirtualMemberCallThisPointer(EvalInfo &Info, const Expr *E,
-                                                 const LValue &This) {
-  return checkDynamicType(Info, E, This, AK_MemberCall, false);
+static bool
+checkNonVirtualMemberCallThisPointer(EvalInfo &Info, const Expr *E,
+                                     const LValue &This,
+                                     const CXXMethodDecl *NamedMember) {
+  return checkDynamicType(
+      Info, E, This,
+      isa<CXXDestructorDecl>(NamedMember) ? AK_Destroy : AK_MemberCall, false);
 }
 
 struct DynamicType {
@@ -4807,8 +5080,9 @@ static Optional<DynamicType> ComputeDynamicType(EvalInfo &Info, const Expr *E,
 static const CXXMethodDecl *HandleVirtualDispatch(
     EvalInfo &Info, const Expr *E, LValue &This, const CXXMethodDecl *Found,
     llvm::SmallVectorImpl<QualType> &CovariantAdjustmentPath) {
-  Optional<DynamicType> DynType =
-      ComputeDynamicType(Info, E, This, AK_MemberCall);
+  Optional<DynamicType> DynType = ComputeDynamicType(
+      Info, E, This,
+      isa<CXXDestructorDecl>(Found) ? AK_Destroy : AK_MemberCall);
   if (!DynType)
     return nullptr;
 
@@ -4944,8 +5218,7 @@ static bool HandleDynamicCast(EvalInfo &Info, const ExplicitCastExpr *E,
     if (!E->isGLValue()) {
       //   The value of a failed cast to pointer type is the null pointer value
       //   of the required result type.
-      auto TargetVal = Info.Ctx.getTargetNullPointerValue(E->getType());
-      Ptr.setNull(E->getType(), TargetVal);
+      Ptr.setNull(Info.Ctx, E->getType());
       return true;
     }
 
@@ -5022,7 +5295,8 @@ struct StartLifetimeOfUnionMemberHandler {
     //  * No variant members' lifetimes begin
     //  * All scalar subobjects whose lifetimes begin have indeterminate values
     assert(SubobjType->isUnionType());
-    if (!declaresSameEntity(Subobj.getUnionField(), Field))
+    if (!declaresSameEntity(Subobj.getUnionField(), Field) ||
+        !Subobj.getUnionValue().hasValue())
       Subobj.setUnion(Field, getDefaultInitValue(Field->getType()));
     return true;
   }
@@ -5054,7 +5328,9 @@ static bool HandleUnionActiveMemberChange(EvalInfo &Info, const Expr *LHSExpr,
     //   -- If E is of the form A.B, S(E) contains the elements of S(A)...
     if (auto *ME = dyn_cast<MemberExpr>(E)) {
       auto *FD = dyn_cast<FieldDecl>(ME->getMemberDecl());
-      if (!FD)
+      // Note that we can't implicitly start the lifetime of a reference,
+      // so we don't need to proceed any further if we reach one.
+      if (!FD || FD->getType()->isReferenceType())
         break;
 
       //    ... and also contains A.B if B names a union member
@@ -5165,18 +5441,18 @@ static bool EvaluateArgs(ArrayRef<const Expr *> Args, ArgVector &ArgValues,
         }
     }
   }
-  for (ArrayRef<const Expr*>::iterator I = Args.begin(), E = Args.end();
-       I != E; ++I) {
-    if (!Evaluate(ArgValues[I - Args.begin()], Info, *I)) {
+  for (unsigned Idx = 0; Idx < Args.size(); Idx++) {
+    if (!Evaluate(ArgValues[Idx], Info, Args[Idx])) {
       // If we're checking for a potential constant expression, evaluate all
       // initializers even if some of them fail.
       if (!Info.noteFailure())
         return false;
       Success = false;
     } else if (!ForbiddenNullArgs.empty() &&
-               ForbiddenNullArgs[I - Args.begin()] &&
-               ArgValues[I - Args.begin()].isNullPointer()) {
-      Info.CCEDiag(*I, diag::note_non_null_attribute_failed);
+               ForbiddenNullArgs[Idx] &&
+               ArgValues[Idx].isLValue() &&
+               ArgValues[Idx].isNullPointer()) {
+      Info.CCEDiag(Args[Idx], diag::note_non_null_attribute_failed);
       if (!Info.noteFailure())
         return false;
       Success = false;
@@ -5459,9 +5735,21 @@ static bool HandleConstructorCall(const Expr *E, const LValue &This,
                                Info, Result);
 }
 
-static bool HandleDestructorCallImpl(EvalInfo &Info, SourceLocation CallLoc,
-                                     const LValue &This, APValue &Value,
-                                     QualType T) {
+static bool HandleDestructionImpl(EvalInfo &Info, SourceLocation CallLoc,
+                                  const LValue &This, APValue &Value,
+                                  QualType T) {
+  // Objects can only be destroyed while they're within their lifetimes.
+  // FIXME: We have no representation for whether an object of type nullptr_t
+  // is in its lifetime; it usually doesn't matter. Perhaps we should model it
+  // as indeterminate instead?
+  if (Value.isAbsent() && !T->isNullPtrType()) {
+    APValue Printable;
+    This.moveInto(Printable);
+    Info.FFDiag(CallLoc, diag::note_constexpr_destroy_out_of_lifetime)
+      << Printable.getAsString(Info.Ctx, Info.Ctx.getLValueReferenceType(T));
+    return false;
+  }
+
   // Invent an expression for location purposes.
   // FIXME: We shouldn't need to do this.
   OpaqueValueExpr LocE(CallLoc, Info.Ctx.IntTy, VK_RValue);
@@ -5476,10 +5764,16 @@ static bool HandleDestructorCallImpl(EvalInfo &Info, SourceLocation CallLoc,
     if (!HandleLValueArrayAdjustment(Info, &LocE, ElemLV, ElemT, Size))
       return false;
 
+    // Ensure that we have actual array elements available to destroy; the
+    // destructors might mutate the value, so we can't run them on the array
+    // filler.
+    if (Size && Size > Value.getArrayInitializedElts())
+      expandArray(Value, Value.getArraySize() - 1);
+
     for (; Size != 0; --Size) {
       APValue &Elem = Value.getArrayInitializedElt(Size - 1);
-      if (!HandleDestructorCallImpl(Info, CallLoc, ElemLV, Elem, ElemT) ||
-          !HandleLValueArrayAdjustment(Info, &LocE, ElemLV, ElemT, -1))
+      if (!HandleLValueArrayAdjustment(Info, &LocE, ElemLV, ElemT, -1) ||
+          !HandleDestructionImpl(Info, CallLoc, ElemLV, Elem, ElemT))
         return false;
     }
 
@@ -5505,16 +5799,12 @@ static bool HandleDestructorCallImpl(EvalInfo &Info, SourceLocation CallLoc,
   }
 
   const CXXDestructorDecl *DD = RD->getDestructor();
-  if (!DD) {
-    // FIXME: Can we get here for a type with an irrelevant destructor?
+  if (!DD && !RD->hasTrivialDestructor()) {
     Info.FFDiag(CallLoc);
     return false;
   }
 
-  const FunctionDecl *Definition = nullptr;
-  const Stmt *Body = DD->getBody(Definition);
-
-  if ((DD && DD->isTrivial()) ||
+  if (!DD || DD->isTrivial() ||
       (RD->isAnonymousStructOrUnion() && RD->isUnion())) {
     // A trivial destructor just ends the lifetime of the object. Check for
     // this case before checking for a body, because we might not bother
@@ -5532,6 +5822,9 @@ static bool HandleDestructorCallImpl(EvalInfo &Info, SourceLocation CallLoc,
   if (!Info.CheckCallLimit(CallLoc))
     return false;
 
+  const FunctionDecl *Definition = nullptr;
+  const Stmt *Body = DD->getBody(Definition);
+
   if (!CheckConstexprFunction(Info, CallLoc, DD, Definition, Body))
     return false;
 
@@ -5542,6 +5835,16 @@ static bool HandleDestructorCallImpl(EvalInfo &Info, SourceLocation CallLoc,
   EvalInfo::EvaluatingDestructorRAII EvalObj(
       Info,
       ObjectUnderConstruction{This.getLValueBase(), This.Designator.Entries});
+  if (!EvalObj.DidInsert) {
+    // C++2a [class.dtor]p19:
+    //   the behavior is undefined if the destructor is invoked for an object
+    //   whose lifetime has ended
+    // (Note that formally the lifetime ends when the period of destruction
+    // begins, even though certain uses of the object remain valid until the
+    // period of destruction ends.)
+    Info.FFDiag(CallLoc, diag::note_constexpr_double_destroy);
+    return false;
+  }
 
   // FIXME: Creating an APValue just to hold a nonexistent return value is
   // wasteful.
@@ -5568,8 +5871,8 @@ static bool HandleDestructorCallImpl(EvalInfo &Info, SourceLocation CallLoc,
       return false;
 
     APValue *SubobjectValue = &Value.getStructField(FD->getFieldIndex());
-    if (!HandleDestructorCallImpl(Info, CallLoc, Subobject, *SubobjectValue,
-                                  FD->getType()))
+    if (!HandleDestructionImpl(Info, CallLoc, Subobject, *SubobjectValue,
+                               FD->getType()))
       return false;
   }
 
@@ -5587,8 +5890,8 @@ static bool HandleDestructorCallImpl(EvalInfo &Info, SourceLocation CallLoc,
       return false;
 
     APValue *SubobjectValue = &Value.getStructBase(BasesLeft);
-    if (!HandleDestructorCallImpl(Info, CallLoc, Subobject, *SubobjectValue,
-                                  BaseType))
+    if (!HandleDestructionImpl(Info, CallLoc, Subobject, *SubobjectValue,
+                               BaseType))
       return false;
   }
   assert(BasesLeft == 0 && "NumBases was wrong?");
@@ -5598,17 +5901,213 @@ static bool HandleDestructorCallImpl(EvalInfo &Info, SourceLocation CallLoc,
   return true;
 }
 
-static bool HandleDestructorCall(EvalInfo &Info, APValue::LValueBase LVBase,
-                                 APValue &Value, QualType T) {
-  SourceLocation Loc;
-  if (const ValueDecl *VD = LVBase.dyn_cast<const ValueDecl*>())
-    Loc = VD->getLocation();
-  else if (const Expr *E = LVBase.dyn_cast<const Expr*>())
-    Loc = E->getExprLoc();
+namespace {
+struct DestroyObjectHandler {
+  EvalInfo &Info;
+  const Expr *E;
+  const LValue &This;
+  const AccessKinds AccessKind;
+
+  typedef bool result_type;
+  bool failed() { return false; }
+  bool found(APValue &Subobj, QualType SubobjType) {
+    return HandleDestructionImpl(Info, E->getExprLoc(), This, Subobj,
+                                 SubobjType);
+  }
+  bool found(APSInt &Value, QualType SubobjType) {
+    Info.FFDiag(E, diag::note_constexpr_destroy_complex_elem);
+    return false;
+  }
+  bool found(APFloat &Value, QualType SubobjType) {
+    Info.FFDiag(E, diag::note_constexpr_destroy_complex_elem);
+    return false;
+  }
+};
+}
+
+/// Perform a destructor or pseudo-destructor call on the given object, which
+/// might in general not be a complete object.
+static bool HandleDestruction(EvalInfo &Info, const Expr *E,
+                              const LValue &This, QualType ThisType) {
+  CompleteObject Obj = findCompleteObject(Info, E, AK_Destroy, This, ThisType);
+  DestroyObjectHandler Handler = {Info, E, This, AK_Destroy};
+  return Obj && findSubobject(Info, E, Obj, This.Designator, Handler);
+}
+
+/// Destroy and end the lifetime of the given complete object.
+static bool HandleDestruction(EvalInfo &Info, SourceLocation Loc,
+                              APValue::LValueBase LVBase, APValue &Value,
+                              QualType T) {
+  // If we've had an unmodeled side-effect, we can't rely on mutable state
+  // (such as the object we're about to destroy) being correct.
+  if (Info.EvalStatus.HasSideEffects)
+    return false;
 
   LValue LV;
   LV.set({LVBase});
-  return HandleDestructorCallImpl(Info, Loc, LV, Value, T);
+  return HandleDestructionImpl(Info, Loc, LV, Value, T);
+}
+
+/// Perform a call to 'perator new' or to `__builtin_operator_new'.
+static bool HandleOperatorNewCall(EvalInfo &Info, const CallExpr *E,
+                                  LValue &Result) {
+  if (Info.checkingPotentialConstantExpression() ||
+      Info.SpeculativeEvaluationDepth)
+    return false;
+
+  // This is permitted only within a call to std::allocator<T>::allocate.
+  auto Caller = Info.getStdAllocatorCaller("allocate");
+  if (!Caller) {
+    Info.FFDiag(E->getExprLoc(), Info.getLangOpts().CPlusPlus2a
+                                     ? diag::note_constexpr_new_untyped
+                                     : diag::note_constexpr_new);
+    return false;
+  }
+
+  QualType ElemType = Caller.ElemType;
+  if (ElemType->isIncompleteType() || ElemType->isFunctionType()) {
+    Info.FFDiag(E->getExprLoc(),
+                diag::note_constexpr_new_not_complete_object_type)
+        << (ElemType->isIncompleteType() ? 0 : 1) << ElemType;
+    return false;
+  }
+
+  APSInt ByteSize;
+  if (!EvaluateInteger(E->getArg(0), ByteSize, Info))
+    return false;
+  bool IsNothrow = false;
+  for (unsigned I = 1, N = E->getNumArgs(); I != N; ++I) {
+    EvaluateIgnoredValue(Info, E->getArg(I));
+    IsNothrow |= E->getType()->isNothrowT();
+  }
+
+  CharUnits ElemSize;
+  if (!HandleSizeof(Info, E->getExprLoc(), ElemType, ElemSize))
+    return false;
+  APInt Size, Remainder;
+  APInt ElemSizeAP(ByteSize.getBitWidth(), ElemSize.getQuantity());
+  APInt::udivrem(ByteSize, ElemSizeAP, Size, Remainder);
+  if (Remainder != 0) {
+    // This likely indicates a bug in the implementation of 'std::allocator'.
+    Info.FFDiag(E->getExprLoc(), diag::note_constexpr_operator_new_bad_size)
+        << ByteSize << APSInt(ElemSizeAP, true) << ElemType;
+    return false;
+  }
+
+  if (ByteSize.getActiveBits() > ConstantArrayType::getMaxSizeBits(Info.Ctx)) {
+    if (IsNothrow) {
+      Result.setNull(Info.Ctx, E->getType());
+      return true;
+    }
+
+    Info.FFDiag(E, diag::note_constexpr_new_too_large) << APSInt(Size, true);
+    return false;
+  }
+
+  QualType AllocType = Info.Ctx.getConstantArrayType(ElemType, Size, nullptr,
+                                                     ArrayType::Normal, 0);
+  APValue *Val = Info.createHeapAlloc(E, AllocType, Result);
+  *Val = APValue(APValue::UninitArray(), 0, Size.getZExtValue());
+  Result.addArray(Info, E, cast<ConstantArrayType>(AllocType));
+  return true;
+}
+
+static bool hasVirtualDestructor(QualType T) {
+  if (CXXRecordDecl *RD = T->getAsCXXRecordDecl())
+    if (CXXDestructorDecl *DD = RD->getDestructor())
+      return DD->isVirtual();
+  return false;
+}
+
+static const FunctionDecl *getVirtualOperatorDelete(QualType T) {
+  if (CXXRecordDecl *RD = T->getAsCXXRecordDecl())
+    if (CXXDestructorDecl *DD = RD->getDestructor())
+      return DD->isVirtual() ? DD->getOperatorDelete() : nullptr;
+  return nullptr;
+}
+
+/// Check that the given object is a suitable pointer to a heap allocation that
+/// still exists and is of the right kind for the purpose of a deletion.
+///
+/// On success, returns the heap allocation to deallocate. On failure, produces
+/// a diagnostic and returns None.
+static Optional<DynAlloc *> CheckDeleteKind(EvalInfo &Info, const Expr *E,
+                                            const LValue &Pointer,
+                                            DynAlloc::Kind DeallocKind) {
+  auto PointerAsString = [&] {
+    return Pointer.toString(Info.Ctx, Info.Ctx.VoidPtrTy);
+  };
+
+  DynamicAllocLValue DA = Pointer.Base.dyn_cast<DynamicAllocLValue>();
+  if (!DA) {
+    Info.FFDiag(E, diag::note_constexpr_delete_not_heap_alloc)
+        << PointerAsString();
+    if (Pointer.Base)
+      NoteLValueLocation(Info, Pointer.Base);
+    return None;
+  }
+
+  Optional<DynAlloc *> Alloc = Info.lookupDynamicAlloc(DA);
+  if (!Alloc) {
+    Info.FFDiag(E, diag::note_constexpr_double_delete);
+    return None;
+  }
+
+  QualType AllocType = Pointer.Base.getDynamicAllocType();
+  if (DeallocKind != (*Alloc)->getKind()) {
+    Info.FFDiag(E, diag::note_constexpr_new_delete_mismatch)
+        << DeallocKind << (*Alloc)->getKind() << AllocType;
+    NoteLValueLocation(Info, Pointer.Base);
+    return None;
+  }
+
+  bool Subobject = false;
+  if (DeallocKind == DynAlloc::New) {
+    Subobject = Pointer.Designator.MostDerivedPathLength != 0 ||
+                Pointer.Designator.isOnePastTheEnd();
+  } else {
+    Subobject = Pointer.Designator.Entries.size() != 1 ||
+                Pointer.Designator.Entries[0].getAsArrayIndex() != 0;
+  }
+  if (Subobject) {
+    Info.FFDiag(E, diag::note_constexpr_delete_subobject)
+        << PointerAsString() << Pointer.Designator.isOnePastTheEnd();
+    return None;
+  }
+
+  return Alloc;
+}
+
+// Perform a call to 'operator delete' or '__builtin_operator_delete'.
+bool HandleOperatorDeleteCall(EvalInfo &Info, const CallExpr *E) {
+  if (Info.checkingPotentialConstantExpression() ||
+      Info.SpeculativeEvaluationDepth)
+    return false;
+
+  // This is permitted only within a call to std::allocator<T>::deallocate.
+  if (!Info.getStdAllocatorCaller("deallocate")) {
+    Info.FFDiag(E->getExprLoc());
+    return true;
+  }
+
+  LValue Pointer;
+  if (!EvaluatePointer(E->getArg(0), Pointer, Info))
+    return false;
+  for (unsigned I = 1, N = E->getNumArgs(); I != N; ++I)
+    EvaluateIgnoredValue(Info, E->getArg(I));
+
+  if (Pointer.Designator.Invalid)
+    return false;
+
+  // Deleting a null pointer has no effect.
+  if (Pointer.isNullPointer())
+    return true;
+
+  if (!CheckDeleteKind(Info, E, Pointer, DynAlloc::StdAllocator))
+    return false;
+
+  Info.HeapAllocs.erase(Pointer.Base.get<DynamicAllocLValue>());
+  return true;
 }
 
 //===----------------------------------------------------------------------===//
@@ -5943,9 +6442,8 @@ class BufferToAPValueConverter {
     QualType RepresentationType = Ty->getDecl()->getIntegerType();
     assert(!RepresentationType.isNull() &&
            "enum forward decl should be caught by Sema");
-    const BuiltinType *AsBuiltin =
-        RepresentationType.getCanonicalType()->getAs<BuiltinType>();
-    assert(AsBuiltin && "non-integral enum underlying type?");
+    const auto *AsBuiltin =
+        RepresentationType.getCanonicalType()->castAs<BuiltinType>();
     // Recurse into the underlying type. Treat std::byte transparently as
     // unsigned char.
     return visit(AsBuiltin, Offset, /*EnumTy=*/Ty);
@@ -5989,7 +6487,7 @@ class BufferToAPValueConverter {
 #define NON_CANONICAL_UNLESS_DEPENDENT(Class, Base)                            \
   case Type::Class:                                                            \
     llvm_unreachable("either dependent or not canonical!");
-#include "clang/AST/TypeNodes.def"
+#include "clang/AST/TypeNodes.inc"
     }
     llvm_unreachable("Unhandled Type::TypeClass");
   }
@@ -6226,6 +6724,12 @@ public:
     return StmtVisitorTy::Visit(E->getSubExpr()) && Scope.destroy();
   }
 
+  // Temporaries are registered when created, so we don't care about
+  // CXXBindTemporaryExpr.
+  bool VisitCXXBindTemporaryExpr(const CXXBindTemporaryExpr *E) {
+    return StmtVisitorTy::Visit(E->getSubExpr());
+  }
+
   bool VisitCXXReinterpretCastExpr(const CXXReinterpretCastExpr *E) {
     CCEDiag(E, diag::note_constexpr_invalid_cast) << 0;
     return static_cast<Derived*>(this)->VisitCastExpr(E);
@@ -6261,13 +6765,18 @@ public:
     }
   }
 
+  bool VisitCXXRewrittenBinaryOperator(const CXXRewrittenBinaryOperator *E) {
+    return StmtVisitorTy::Visit(E->getSemanticForm());
+  }
+
   bool VisitBinaryConditionalOperator(const BinaryConditionalOperator *E) {
     // Evaluate and cache the common expression. We treat it as a temporary,
     // even though it's not quite the same thing.
     LValue CommonLV;
     if (!Evaluate(Info.CurrentCall->createTemporary(
-                      E->getOpaqueValue(), getStorageType(Info.Ctx, E->getOpaqueValue()),
-                      false, CommonLV),
+                      E->getOpaqueValue(),
+                      getStorageType(Info.Ctx, E->getOpaqueValue()), false,
+                      CommonLV),
                   Info, E->getCommon()))
       return false;
 
@@ -6346,11 +6855,21 @@ public:
         HasQualifier = ME->hasQualifier();
       } else if (const BinaryOperator *BE = dyn_cast<BinaryOperator>(Callee)) {
         // Indirect bound member calls ('.*' or '->*').
-        Member = dyn_cast_or_null<CXXMethodDecl>(
-            HandleMemberPointerAccess(Info, BE, ThisVal, false));
+        const ValueDecl *D =
+            HandleMemberPointerAccess(Info, BE, ThisVal, false);
+        if (!D)
+          return false;
+        Member = dyn_cast<CXXMethodDecl>(D);
         if (!Member)
           return Error(Callee);
         This = &ThisVal;
+      } else if (const auto *PDE = dyn_cast<CXXPseudoDestructorExpr>(Callee)) {
+        if (!Info.getLangOpts().CPlusPlus2a)
+          Info.CCEDiag(PDE, diag::note_constexpr_pseudo_destructor);
+        // FIXME: If pseudo-destructor calls ever start ending the lifetime of
+        // their callee, we should start calling HandleDestruction here.
+        // For now, we just evaluate the object argument and discard it.
+        return EvaluateObjectArgument(Info, PDE->getBase(), ThisVal);
       } else
         return Error(Callee);
       FD = Member;
@@ -6419,6 +6938,17 @@ public:
           FD = cast<CXXMethodDecl>(CorrespondingCallOpSpecialization);
         } else
           FD = LambdaCallOp;
+      } else if (FD->isReplaceableGlobalAllocationFunction()) {
+        if (FD->getDeclName().getCXXOverloadedOperator() == OO_New ||
+            FD->getDeclName().getCXXOverloadedOperator() == OO_Array_New) {
+          LValue Ptr;
+          if (!HandleOperatorNewCall(Info, E, Ptr))
+            return false;
+          Ptr.moveInto(Result);
+          return true;
+        } else {
+          return HandleOperatorDeleteCall(Info, E);
+        }
       }
     } else
       return Error(E);
@@ -6434,9 +6964,18 @@ public:
           return false;
       } else {
         // Check that the 'this' pointer points to an object of the right type.
-        if (!checkNonVirtualMemberCallThisPointer(Info, E, *This))
+        // FIXME: If this is an assignment operator call, we may need to change
+        // the active union member before we check this.
+        if (!checkNonVirtualMemberCallThisPointer(Info, E, *This, NamedMember))
           return false;
       }
+    }
+
+    // Destructor calls are different enough that they have their own codepath.
+    if (auto *DD = dyn_cast<CXXDestructorDecl>(FD)) {
+      assert(This && "no 'this' pointer for destructor call");
+      return HandleDestruction(Info, E, *This,
+                               Info.Ctx.getRecordType(DD->getParent()));
     }
 
     const FunctionDecl *Definition = nullptr;
@@ -6682,7 +7221,7 @@ public:
 
     const ValueDecl *MD = E->getMemberDecl();
     if (const FieldDecl *FD = dyn_cast<FieldDecl>(E->getMemberDecl())) {
-      assert(BaseTy->getAs<RecordType>()->getDecl()->getCanonicalDecl() ==
+      assert(BaseTy->castAs<RecordType>()->getDecl()->getCanonicalDecl() ==
              FD->getParent()->getCanonicalDecl() && "record / field mismatch");
       (void)BaseTy;
       if (!HandleLValueMember(this->Info, E, Result, FD))
@@ -6945,9 +7484,7 @@ bool LValueExprEvaluator::VisitMaterializeTemporaryExpr(
   QualType Type = Inner->getType();
 
   // Materialize the temporary itself.
-  if (!EvaluateInPlace(*Value, Info, Result, Inner) ||
-      (E->getStorageDuration() == SD_Static &&
-       !CheckConstantExpression(Info, E->getExprLoc(), Type, *Value))) {
+  if (!EvaluateInPlace(*Value, Info, Result, Inner)) {
     *Value = APValue();
     return false;
   }
@@ -7277,8 +7814,7 @@ public:
     return true;
   }
   bool ZeroInitialization(const Expr *E) {
-    auto TargetVal = Info.Ctx.getTargetNullPointerValue(E->getType());
-    Result.setNull(E->getType(), TargetVal);
+    Result.setNull(Info.Ctx, E->getType());
     return true;
   }
 
@@ -7338,6 +7874,8 @@ public:
     }
     return true;
   }
+
+  bool VisitCXXNewExpr(const CXXNewExpr *E);
 
   bool VisitSourceLocExpr(const SourceLocExpr *E) {
     assert(E->isStringType() && "SourceLocExpr isn't a pointer type?");
@@ -7403,12 +7941,22 @@ bool PointerExprEvaluator::VisitCastExpr(const CastExpr *E) {
     // permitted in constant expressions in C++11. Bitcasts from cv void* are
     // also static_casts, but we disallow them as a resolution to DR1312.
     if (!E->getType()->isVoidPointerType()) {
-      Result.Designator.setInvalid();
-      if (SubExpr->getType()->isVoidPointerType())
-        CCEDiag(E, diag::note_constexpr_invalid_cast)
-          << 3 << SubExpr->getType();
-      else
-        CCEDiag(E, diag::note_constexpr_invalid_cast) << 2;
+      if (!Result.InvalidBase && !Result.Designator.Invalid &&
+          !Result.IsNullPtr &&
+          Info.Ctx.hasSameUnqualifiedType(Result.Designator.getType(Info.Ctx),
+                                          E->getType()->getPointeeType()) &&
+          Info.getStdAllocatorCaller("allocate")) {
+        // Inside a call to std::allocator::allocate and friends, we permit
+        // casting from void* back to cv1 T* for a pointer that points to a
+        // cv2 T.
+      } else {
+        Result.Designator.setInvalid();
+        if (SubExpr->getType()->isVoidPointerType())
+          CCEDiag(E, diag::note_constexpr_invalid_cast)
+            << 3 << SubExpr->getType();
+        else
+          CCEDiag(E, diag::note_constexpr_invalid_cast) << 2;
+      }
     }
     if (E->getCastKind() == CK_AddressSpaceConversion && Result.IsNullPtr)
       ZeroInitialization(E);
@@ -7645,6 +8193,8 @@ bool PointerExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
 
     return true;
   }
+  case Builtin::BI__builtin_operator_new:
+    return HandleOperatorNewCall(Info, E, Result);
   case Builtin::BI__builtin_launder:
     return evaluatePointer(E->getArg(0), Result);
   case Builtin::BIstrchr:
@@ -7896,10 +8446,208 @@ bool PointerExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
   }
 
   default:
-    return visitNonBuiltinCallExpr(E);
+    break;
   }
+
+  return visitNonBuiltinCallExpr(E);
 }
 
+static bool EvaluateArrayNewInitList(EvalInfo &Info, LValue &This,
+                                     APValue &Result, const InitListExpr *ILE,
+                                     QualType AllocType);
+
+bool PointerExprEvaluator::VisitCXXNewExpr(const CXXNewExpr *E) {
+  if (!Info.getLangOpts().CPlusPlus2a)
+    Info.CCEDiag(E, diag::note_constexpr_new);
+
+  // We cannot speculatively evaluate a delete expression.
+  if (Info.SpeculativeEvaluationDepth)
+    return false;
+
+  FunctionDecl *OperatorNew = E->getOperatorNew();
+
+  bool IsNothrow = false;
+  bool IsPlacement = false;
+  if (OperatorNew->isReservedGlobalPlacementOperator() &&
+      Info.CurrentCall->isStdFunction() && !E->isArray()) {
+    // FIXME Support array placement new.
+    assert(E->getNumPlacementArgs() == 1);
+    if (!EvaluatePointer(E->getPlacementArg(0), Result, Info))
+      return false;
+    if (Result.Designator.Invalid)
+      return false;
+    IsPlacement = true;
+  } else if (!OperatorNew->isReplaceableGlobalAllocationFunction()) {
+    Info.FFDiag(E, diag::note_constexpr_new_non_replaceable)
+        << isa<CXXMethodDecl>(OperatorNew) << OperatorNew;
+    return false;
+  } else if (E->getNumPlacementArgs()) {
+    // The only new-placement list we support is of the form (std::nothrow).
+    //
+    // FIXME: There is no restriction on this, but it's not clear that any
+    // other form makes any sense. We get here for cases such as:
+    //
+    //   new (std::align_val_t{N}) X(int)
+    //
+    // (which should presumably be valid only if N is a multiple of
+    // alignof(int), and in any case can't be deallocated unless N is
+    // alignof(X) and X has new-extended alignment).
+    if (E->getNumPlacementArgs() != 1 ||
+        !E->getPlacementArg(0)->getType()->isNothrowT())
+      return Error(E, diag::note_constexpr_new_placement);
+
+    LValue Nothrow;
+    if (!EvaluateLValue(E->getPlacementArg(0), Nothrow, Info))
+      return false;
+    IsNothrow = true;
+  }
+
+  const Expr *Init = E->getInitializer();
+  const InitListExpr *ResizedArrayILE = nullptr;
+
+  QualType AllocType = E->getAllocatedType();
+  if (Optional<const Expr*> ArraySize = E->getArraySize()) {
+    const Expr *Stripped = *ArraySize;
+    for (; auto *ICE = dyn_cast<ImplicitCastExpr>(Stripped);
+         Stripped = ICE->getSubExpr())
+      if (ICE->getCastKind() != CK_NoOp &&
+          ICE->getCastKind() != CK_IntegralCast)
+        break;
+
+    llvm::APSInt ArrayBound;
+    if (!EvaluateInteger(Stripped, ArrayBound, Info))
+      return false;
+
+    // C++ [expr.new]p9:
+    //   The expression is erroneous if:
+    //   -- [...] its value before converting to size_t [or] applying the
+    //      second standard conversion sequence is less than zero
+    if (ArrayBound.isSigned() && ArrayBound.isNegative()) {
+      if (IsNothrow)
+        return ZeroInitialization(E);
+
+      Info.FFDiag(*ArraySize, diag::note_constexpr_new_negative)
+          << ArrayBound << (*ArraySize)->getSourceRange();
+      return false;
+    }
+
+    //   -- its value is such that the size of the allocated object would
+    //      exceed the implementation-defined limit
+    if (ConstantArrayType::getNumAddressingBits(Info.Ctx, AllocType,
+                                                ArrayBound) >
+        ConstantArrayType::getMaxSizeBits(Info.Ctx)) {
+      if (IsNothrow)
+        return ZeroInitialization(E);
+
+      Info.FFDiag(*ArraySize, diag::note_constexpr_new_too_large)
+        << ArrayBound << (*ArraySize)->getSourceRange();
+      return false;
+    }
+
+    //   -- the new-initializer is a braced-init-list and the number of
+    //      array elements for which initializers are provided [...]
+    //      exceeds the number of elements to initialize
+    if (Init) {
+      auto *CAT = Info.Ctx.getAsConstantArrayType(Init->getType());
+      assert(CAT && "unexpected type for array initializer");
+
+      unsigned Bits =
+          std::max(CAT->getSize().getBitWidth(), ArrayBound.getBitWidth());
+      llvm::APInt InitBound = CAT->getSize().zextOrSelf(Bits);
+      llvm::APInt AllocBound = ArrayBound.zextOrSelf(Bits);
+      if (InitBound.ugt(AllocBound)) {
+        if (IsNothrow)
+          return ZeroInitialization(E);
+
+        Info.FFDiag(*ArraySize, diag::note_constexpr_new_too_small)
+            << AllocBound.toString(10, /*Signed=*/false)
+            << InitBound.toString(10, /*Signed=*/false)
+            << (*ArraySize)->getSourceRange();
+        return false;
+      }
+
+      // If the sizes differ, we must have an initializer list, and we need
+      // special handling for this case when we initialize.
+      if (InitBound != AllocBound)
+        ResizedArrayILE = cast<InitListExpr>(Init);
+    }
+
+    AllocType = Info.Ctx.getConstantArrayType(AllocType, ArrayBound, nullptr,
+                                              ArrayType::Normal, 0);
+  } else {
+    assert(!AllocType->isArrayType() &&
+           "array allocation with non-array new");
+  }
+
+  APValue *Val;
+  if (IsPlacement) {
+    AccessKinds AK = AK_Construct;
+    struct FindObjectHandler {
+      EvalInfo &Info;
+      const Expr *E;
+      QualType AllocType;
+      const AccessKinds AccessKind;
+      APValue *Value;
+
+      typedef bool result_type;
+      bool failed() { return false; }
+      bool found(APValue &Subobj, QualType SubobjType) {
+        // FIXME: Reject the cases where [basic.life]p8 would not permit the
+        // old name of the object to be used to name the new object.
+        if (!Info.Ctx.hasSameUnqualifiedType(SubobjType, AllocType)) {
+          Info.FFDiag(E, diag::note_constexpr_placement_new_wrong_type) <<
+            SubobjType << AllocType;
+          return false;
+        }
+        Value = &Subobj;
+        return true;
+      }
+      bool found(APSInt &Value, QualType SubobjType) {
+        Info.FFDiag(E, diag::note_constexpr_construct_complex_elem);
+        return false;
+      }
+      bool found(APFloat &Value, QualType SubobjType) {
+        Info.FFDiag(E, diag::note_constexpr_construct_complex_elem);
+        return false;
+      }
+    } Handler = {Info, E, AllocType, AK, nullptr};
+
+    CompleteObject Obj = findCompleteObject(Info, E, AK, Result, AllocType);
+    if (!Obj || !findSubobject(Info, E, Obj, Result.Designator, Handler))
+      return false;
+
+    Val = Handler.Value;
+
+    // [basic.life]p1:
+    //   The lifetime of an object o of type T ends when [...] the storage
+    //   which the object occupies is [...] reused by an object that is not
+    //   nested within o (6.6.2).
+    *Val = APValue();
+  } else {
+    // Perform the allocation and obtain a pointer to the resulting object.
+    Val = Info.createHeapAlloc(E, AllocType, Result);
+    if (!Val)
+      return false;
+  }
+
+  if (ResizedArrayILE) {
+    if (!EvaluateArrayNewInitList(Info, Result, *Val, ResizedArrayILE,
+                                  AllocType))
+      return false;
+  } else if (Init) {
+    if (!EvaluateInPlace(*Val, Info, Result, Init))
+      return false;
+  } else {
+    *Val = getDefaultInitValue(AllocType);
+  }
+
+  // Array new returns a pointer to the first element, not a pointer to the
+  // array.
+  if (auto *AT = AllocType->getAsArrayTypeUnsafe())
+    Result.addArray(Info, E, cast<ConstantArrayType>(AT));
+
+  return true;
+}
 //===----------------------------------------------------------------------===//
 // Member Pointer Evaluation
 //===----------------------------------------------------------------------===//
@@ -8023,13 +8771,6 @@ namespace {
     bool VisitCXXInheritedCtorInitExpr(const CXXInheritedCtorInitExpr *E);
     bool VisitCXXConstructExpr(const CXXConstructExpr *E, QualType T);
     bool VisitCXXStdInitializerListExpr(const CXXStdInitializerListExpr *E);
-
-    // Temporaries are registered when created, so we don't care about
-    // CXXBindTemporaryExpr.
-    bool VisitCXXBindTemporaryExpr(const CXXBindTemporaryExpr *E) {
-      return Visit(E->getSubExpr());
-    }
-
     bool VisitBinCmp(const BinaryOperator *E);
   };
 }
@@ -8367,9 +9108,8 @@ bool RecordExprEvaluator::VisitCXXStdInitializerListExpr(
 
 bool RecordExprEvaluator::VisitLambdaExpr(const LambdaExpr *E) {
   const CXXRecordDecl *ClosureClass = E->getLambdaClass();
-  if (ClosureClass->isInvalidDecl()) return false;
-
-  if (Info.checkingPotentialConstantExpression()) return true;
+  if (ClosureClass->isInvalidDecl())
+    return false;
 
   const size_t NumFields =
       std::distance(ClosureClass->field_begin(), ClosureClass->field_end());
@@ -8630,7 +9370,7 @@ VectorExprEvaluator::VisitInitListExpr(const InitListExpr *E) {
 
 bool
 VectorExprEvaluator::ZeroInitialization(const Expr *E) {
-  const VectorType *VT = E->getType()->getAs<VectorType>();
+  const auto *VT = E->getType()->castAs<VectorType>();
   QualType EltTy = VT->getElementType();
   APValue ZeroElement;
   if (EltTy->isIntegerType())
@@ -8688,14 +9428,16 @@ namespace {
     bool VisitCallExpr(const CallExpr *E) {
       return handleCallExpr(E, Result, &This);
     }
-    bool VisitInitListExpr(const InitListExpr *E);
+    bool VisitInitListExpr(const InitListExpr *E,
+                           QualType AllocType = QualType());
     bool VisitArrayInitLoopExpr(const ArrayInitLoopExpr *E);
     bool VisitCXXConstructExpr(const CXXConstructExpr *E);
     bool VisitCXXConstructExpr(const CXXConstructExpr *E,
                                const LValue &Subobject,
                                APValue *Value, QualType Type);
-    bool VisitStringLiteral(const StringLiteral *E) {
-      expandStringLiteral(Info, E, Result);
+    bool VisitStringLiteral(const StringLiteral *E,
+                            QualType AllocType = QualType()) {
+      expandStringLiteral(Info, E, Result, AllocType);
       return true;
     }
   };
@@ -8705,6 +9447,15 @@ static bool EvaluateArray(const Expr *E, const LValue &This,
                           APValue &Result, EvalInfo &Info) {
   assert(E->isRValue() && E->getType()->isArrayType() && "not an array rvalue");
   return ArrayExprEvaluator(Info, This, Result).Visit(E);
+}
+
+static bool EvaluateArrayNewInitList(EvalInfo &Info, LValue &This,
+                                     APValue &Result, const InitListExpr *ILE,
+                                     QualType AllocType) {
+  assert(ILE->isRValue() && ILE->getType()->isArrayType() &&
+         "not an array rvalue");
+  return ArrayExprEvaluator(Info, This, Result)
+      .VisitInitListExpr(ILE, AllocType);
 }
 
 // Return true iff the given array filler may depend on the element index.
@@ -8723,15 +9474,23 @@ static bool MaybeElementDependentArrayFiller(const Expr *FillerExpr) {
   return true;
 }
 
-bool ArrayExprEvaluator::VisitInitListExpr(const InitListExpr *E) {
-  const ConstantArrayType *CAT = Info.Ctx.getAsConstantArrayType(E->getType());
+bool ArrayExprEvaluator::VisitInitListExpr(const InitListExpr *E,
+                                           QualType AllocType) {
+  const ConstantArrayType *CAT = Info.Ctx.getAsConstantArrayType(
+      AllocType.isNull() ? E->getType() : AllocType);
   if (!CAT)
     return Error(E);
 
   // C++11 [dcl.init.string]p1: A char array [...] can be initialized by [...]
   // an appropriately-typed string literal enclosed in braces.
-  if (E->isStringLiteralInit())
-    return Visit(E->getInit(0));
+  if (E->isStringLiteralInit()) {
+    auto *SL = dyn_cast<StringLiteral>(E->getInit(0)->IgnoreParens());
+    // FIXME: Support ObjCEncodeExpr here once we support it in
+    // ArrayExprEvaluator generally.
+    if (!SL)
+      return Error(E);
+    return VisitStringLiteral(SL, AllocType);
+  }
 
   bool Success = true;
 
@@ -9013,6 +9772,7 @@ public:
   bool VisitCXXNoexceptExpr(const CXXNoexceptExpr *E);
   bool VisitSizeOfPackExpr(const SizeOfPackExpr *E);
   bool VisitSourceLocExpr(const SourceLocExpr *E);
+  bool VisitConceptSpecializationExpr(const ConceptSpecializationExpr *E);
   // FIXME: Missing: array subscript of vector, member of vector
 };
 
@@ -9195,7 +9955,7 @@ EvaluateBuiltinClassifyType(QualType T, const LangOptions &LangOpts) {
 #define DEPENDENT_TYPE(ID, BASE) case Type::ID:
 #define NON_CANONICAL_TYPE(ID, BASE) case Type::ID:
 #define NON_CANONICAL_UNLESS_DEPENDENT_TYPE(ID, BASE) case Type::ID:
-#include "clang/AST/TypeNodes.def"
+#include "clang/AST/TypeNodes.inc"
   case Type::Auto:
   case Type::DeducedTemplateSpecialization:
       llvm_unreachable("unexpected non-canonical or dependent type");
@@ -9415,6 +10175,8 @@ static QualType getObjectType(APValue::LValueBase B) {
       return E->getType();
   } else if (B.is<TypeInfoLValue>()) {
     return B.getTypeInfoType();
+  } else if (B.is<DynamicAllocLValue>()) {
+    return B.getDynamicAllocType();
   }
 
   return QualType();
@@ -11085,7 +11847,7 @@ bool IntExprEvaluator::VisitBinaryOperator(const BinaryOperator *E) {
       Info.CCEDiag(E, diag::note_constexpr_pointer_subtraction_not_same_array);
 
     QualType Type = E->getLHS()->getType();
-    QualType ElementType = Type->getAs<PointerType>()->getPointeeType();
+    QualType ElementType = Type->castAs<PointerType>()->getPointeeType();
 
     CharUnits ElementSize;
     if (!HandleSizeof(Info, E->getExprLoc(), ElementType, ElementSize))
@@ -11492,6 +12254,12 @@ bool IntExprEvaluator::VisitSizeOfPackExpr(const SizeOfPackExpr *E) {
 bool IntExprEvaluator::VisitCXXNoexceptExpr(const CXXNoexceptExpr *E) {
   return Success(E->getValue(), E);
 }
+
+bool IntExprEvaluator::VisitConceptSpecializationExpr(
+       const ConceptSpecializationExpr *E) {
+  return Success(E->isSatisfied(), E);
+}
+
 
 bool FixedPointExprEvaluator::VisitUnaryOperator(const UnaryOperator *E) {
   switch (E->getOpcode()) {
@@ -11982,9 +12750,9 @@ bool ComplexExprEvaluator::VisitCastExpr(const CastExpr *E) {
     if (!Visit(E->getSubExpr()))
       return false;
 
-    QualType To = E->getType()->getAs<ComplexType>()->getElementType();
+    QualType To = E->getType()->castAs<ComplexType>()->getElementType();
     QualType From
-      = E->getSubExpr()->getType()->getAs<ComplexType>()->getElementType();
+      = E->getSubExpr()->getType()->castAs<ComplexType>()->getElementType();
 
     return HandleFloatToFloatCast(Info, E, From, To, Result.FloatReal) &&
            HandleFloatToFloatCast(Info, E, From, To, Result.FloatImag);
@@ -11994,9 +12762,9 @@ bool ComplexExprEvaluator::VisitCastExpr(const CastExpr *E) {
     if (!Visit(E->getSubExpr()))
       return false;
 
-    QualType To = E->getType()->getAs<ComplexType>()->getElementType();
+    QualType To = E->getType()->castAs<ComplexType>()->getElementType();
     QualType From
-      = E->getSubExpr()->getType()->getAs<ComplexType>()->getElementType();
+      = E->getSubExpr()->getType()->castAs<ComplexType>()->getElementType();
     Result.makeComplexInt();
     return HandleFloatToIntCast(Info, E, From, Result.FloatReal,
                                 To, Result.IntReal) &&
@@ -12018,9 +12786,9 @@ bool ComplexExprEvaluator::VisitCastExpr(const CastExpr *E) {
     if (!Visit(E->getSubExpr()))
       return false;
 
-    QualType To = E->getType()->getAs<ComplexType>()->getElementType();
+    QualType To = E->getType()->castAs<ComplexType>()->getElementType();
     QualType From
-      = E->getSubExpr()->getType()->getAs<ComplexType>()->getElementType();
+      = E->getSubExpr()->getType()->castAs<ComplexType>()->getElementType();
 
     Result.IntReal = HandleIntToIntCast(Info, E, To, From, Result.IntReal);
     Result.IntImag = HandleIntToIntCast(Info, E, To, From, Result.IntImag);
@@ -12394,16 +13162,97 @@ public:
 
   bool VisitCallExpr(const CallExpr *E) {
     switch (E->getBuiltinCallee()) {
-    default:
-      return ExprEvaluatorBaseTy::VisitCallExpr(E);
     case Builtin::BI__assume:
     case Builtin::BI__builtin_assume:
       // The argument is not evaluated!
       return true;
+
+    case Builtin::BI__builtin_operator_delete:
+      return HandleOperatorDeleteCall(Info, E);
+
+    default:
+      break;
     }
+
+    return ExprEvaluatorBaseTy::VisitCallExpr(E);
   }
+
+  bool VisitCXXDeleteExpr(const CXXDeleteExpr *E);
 };
 } // end anonymous namespace
+
+bool VoidExprEvaluator::VisitCXXDeleteExpr(const CXXDeleteExpr *E) {
+  // We cannot speculatively evaluate a delete expression.
+  if (Info.SpeculativeEvaluationDepth)
+    return false;
+
+  FunctionDecl *OperatorDelete = E->getOperatorDelete();
+  if (!OperatorDelete->isReplaceableGlobalAllocationFunction()) {
+    Info.FFDiag(E, diag::note_constexpr_new_non_replaceable)
+        << isa<CXXMethodDecl>(OperatorDelete) << OperatorDelete;
+    return false;
+  }
+
+  const Expr *Arg = E->getArgument();
+
+  LValue Pointer;
+  if (!EvaluatePointer(Arg, Pointer, Info))
+    return false;
+  if (Pointer.Designator.Invalid)
+    return false;
+
+  // Deleting a null pointer has no effect.
+  if (Pointer.isNullPointer()) {
+    // This is the only case where we need to produce an extension warning:
+    // the only other way we can succeed is if we find a dynamic allocation,
+    // and we will have warned when we allocated it in that case.
+    if (!Info.getLangOpts().CPlusPlus2a)
+      Info.CCEDiag(E, diag::note_constexpr_new);
+    return true;
+  }
+
+  Optional<DynAlloc *> Alloc = CheckDeleteKind(
+      Info, E, Pointer, E->isArrayForm() ? DynAlloc::ArrayNew : DynAlloc::New);
+  if (!Alloc)
+    return false;
+  QualType AllocType = Pointer.Base.getDynamicAllocType();
+
+  // For the non-array case, the designator must be empty if the static type
+  // does not have a virtual destructor.
+  if (!E->isArrayForm() && Pointer.Designator.Entries.size() != 0 &&
+      !hasVirtualDestructor(Arg->getType()->getPointeeType())) {
+    Info.FFDiag(E, diag::note_constexpr_delete_base_nonvirt_dtor)
+        << Arg->getType()->getPointeeType() << AllocType;
+    return false;
+  }
+
+  // For a class type with a virtual destructor, the selected operator delete
+  // is the one looked up when building the destructor.
+  if (!E->isArrayForm() && !E->isGlobalDelete()) {
+    const FunctionDecl *VirtualDelete = getVirtualOperatorDelete(AllocType);
+    if (VirtualDelete &&
+        !VirtualDelete->isReplaceableGlobalAllocationFunction()) {
+      Info.FFDiag(E, diag::note_constexpr_new_non_replaceable)
+          << isa<CXXMethodDecl>(VirtualDelete) << VirtualDelete;
+      return false;
+    }
+  }
+
+  if (!HandleDestruction(Info, E->getExprLoc(), Pointer.getLValueBase(),
+                         (*Alloc)->Value, AllocType))
+    return false;
+
+  if (!Info.HeapAllocs.erase(Pointer.Base.dyn_cast<DynamicAllocLValue>())) {
+    // The element was already erased. This means the destructor call also
+    // deleted the object.
+    // FIXME: This probably results in undefined behavior before we get this
+    // far, and should be diagnosed elsewhere first.
+    Info.FFDiag(E, diag::note_constexpr_double_delete);
+    return false;
+  }
+
+  return true;
+}
 
 static bool EvaluateVoid(const Expr *E, EvalInfo &Info) {
   assert(E->isRValue() && E->getType()->isVoidType());
@@ -12554,7 +13403,8 @@ static bool EvaluateAsRValue(EvalInfo &Info, const Expr *E, APValue &Result) {
   }
 
   // Check this core constant expression is a constant expression.
-  return CheckConstantExpression(Info, E->getExprLoc(), E->getType(), Result);
+  return CheckConstantExpression(Info, E->getExprLoc(), E->getType(), Result) &&
+         CheckMemoryLeaks(Info);
 }
 
 static bool FastEvaluateAsRValue(const Expr *Exp, Expr::EvalResult &Result,
@@ -12703,11 +13553,12 @@ bool Expr::EvaluateAsLValue(EvalResult &Result, const ASTContext &Ctx,
   EvalInfo Info(Ctx, Result, EvalInfo::EM_ConstantFold);
   Info.InConstantContext = InConstantContext;
   LValue LV;
+  CheckedTemporaries CheckedTemps;
   if (!EvaluateLValue(this, LV, Info) || !Info.discardCleanups() ||
       Result.HasSideEffects ||
       !CheckLValueConstantExpression(Info, getExprLoc(),
                                      Ctx.getLValueReferenceType(getType()), LV,
-                                     Expr::EvaluateForCodeGen))
+                                     Expr::EvaluateForCodeGen, CheckedTemps))
     return false;
 
   LV.moveInto(Result.Val);
@@ -12723,14 +13574,15 @@ bool Expr::EvaluateAsConstantExpr(EvalResult &Result, ConstExprUsage Usage,
   EvalInfo Info(Ctx, Result, EM);
   Info.InConstantContext = true;
 
-  if (!::Evaluate(Result.Val, Info, this))
+  if (!::Evaluate(Result.Val, Info, this) || Result.HasSideEffects)
     return false;
 
   if (!Info.discardCleanups())
     llvm_unreachable("Unhandled cleanup; missing full expression marker?");
 
-  return CheckConstantExpression(Info, getExprLoc(), getType(), Result.Val,
-                                 Usage);
+  return CheckConstantExpression(Info, getExprLoc(), getStorageType(Ctx, this),
+                                 Result.Val, Usage) &&
+         CheckMemoryLeaks(Info);
 }
 
 bool Expr::EvaluateAsInitializer(APValue &Value, const ASTContext &Ctx,
@@ -12799,7 +13651,43 @@ bool Expr::EvaluateAsInitializer(APValue &Value, const ASTContext &Ctx,
   if (!Info.discardCleanups())
     llvm_unreachable("Unhandled cleanup; missing full expression marker?");
 
-  return CheckConstantExpression(Info, DeclLoc, DeclTy, Value);
+  return CheckConstantExpression(Info, DeclLoc, DeclTy, Value) &&
+         CheckMemoryLeaks(Info);
+}
+
+bool VarDecl::evaluateDestruction(
+    SmallVectorImpl<PartialDiagnosticAt> &Notes) const {
+  assert(getEvaluatedValue() && !getEvaluatedValue()->isAbsent() &&
+         "cannot evaluate destruction of non-constant-initialized variable");
+
+  Expr::EvalStatus EStatus;
+  EStatus.Diag = &Notes;
+
+  // Make a copy of the value for the destructor to mutate.
+  APValue DestroyedValue = *getEvaluatedValue();
+
+  EvalInfo Info(getASTContext(), EStatus, EvalInfo::EM_ConstantExpression);
+  Info.setEvaluatingDecl(this, DestroyedValue,
+                         EvalInfo::EvaluatingDeclKind::Dtor);
+  Info.InConstantContext = true;
+
+  SourceLocation DeclLoc = getLocation();
+  QualType DeclTy = getType();
+
+  LValue LVal;
+  LVal.set(this);
+
+  // FIXME: Consider storing whether this variable has constant destruction in
+  // the EvaluatedStmt so that CodeGen can query it.
+  if (!HandleDestruction(Info, DeclLoc, LVal.Base, DestroyedValue, DeclTy) ||
+      EStatus.HasSideEffects)
+    return false;
+
+  if (!Info.discardCleanups())
+    llvm_unreachable("Unhandled cleanup; missing full expression marker?");
+
+  ensureEvaluatedStmt()->HasConstantDestruction = true;
+  return true;
 }
 
 /// isEvaluatable - Call EvaluateAsRValue to see if this expression can be
@@ -13046,6 +13934,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::CXXBoolLiteralExprClass:
   case Expr::CXXScalarValueInitExprClass:
   case Expr::TypeTraitExprClass:
+  case Expr::ConceptSpecializationExprClass:
   case Expr::ArrayTypeTraitExprClass:
   case Expr::ExpressionTraitExprClass:
   case Expr::CXXNoexceptExprClass:
@@ -13060,6 +13949,9 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
       return CheckEvalInICE(E, Ctx);
     return ICEDiag(IK_NotICE, E->getBeginLoc());
   }
+  case Expr::CXXRewrittenBinaryOperatorClass:
+    return CheckICE(cast<CXXRewrittenBinaryOperator>(E)->getSemanticForm(),
+                    Ctx);
   case Expr::DeclRefExprClass: {
     if (isa<EnumConstantDecl>(cast<DeclRefExpr>(E)->getDecl()))
       return NoDiag();
@@ -13409,7 +14301,7 @@ bool Expr::isCXX11ConstantExpr(const ASTContext &Ctx, APValue *Result,
       ::EvaluateAsRValue(Info, this, Result ? *Result : Scratch) &&
       // FIXME: We don't produce a diagnostic for this, but the callers that
       // call us on arbitrary full-expressions should generally not care.
-      Info.discardCleanups();
+      Info.discardCleanups() && !Status.HasSideEffects;
 
   if (!Diags.empty()) {
     IsConstExpr = false;

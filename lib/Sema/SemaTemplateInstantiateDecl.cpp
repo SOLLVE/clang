@@ -388,6 +388,10 @@ static void instantiateOMPDeclareVariantAttr(
   if (Expr *E = Attr.getVariantFuncRef())
     VariantFuncRef = Subst(E);
 
+  ExprResult Score;
+  if (Expr *E = Attr.getScore())
+    Score = Subst(E);
+
   // Check function/variant ref.
   Optional<std::pair<FunctionDecl *, Expr *>> DeclVarData =
       S.checkOpenMPDeclareVariantFunction(
@@ -396,7 +400,10 @@ static void instantiateOMPDeclareVariantAttr(
     return;
   // Instantiate the attribute.
   Sema::OpenMPDeclareVariantCtsSelectorData Data(
-      Attr.getCtxSelectorSet(), Attr.getCtxSelector(), Attr.getImplVendor());
+      Attr.getCtxSelectorSet(), Attr.getCtxSelector(),
+      llvm::makeMutableArrayRef(Attr.implVendors_begin(),
+                                Attr.implVendors_size()),
+      Score);
   S.ActOnOpenMPDeclareVariantDirective(DeclVarData.getValue().first,
                                        DeclVarData.getValue().second,
                                        Attr.getRange(), Data);
@@ -3508,14 +3515,21 @@ TemplateDeclInstantiator::SubstTemplateParams(TemplateParameterList *L) {
   if (Invalid)
     return nullptr;
 
-  // Note: we substitute into associated constraints later
-  Expr *const UninstantiatedRequiresClause = L->getRequiresClause();
+  // FIXME: Concepts: Substitution into requires clause should only happen when
+  // checking satisfaction.
+  Expr *InstRequiresClause = nullptr;
+  if (Expr *E = L->getRequiresClause()) {
+    ExprResult Res = SemaRef.SubstExpr(E, TemplateArgs);
+    if (Res.isInvalid() || !Res.isUsable()) {
+      return nullptr;
+    }
+    InstRequiresClause = Res.get();
+  }
 
   TemplateParameterList *InstL
     = TemplateParameterList::Create(SemaRef.Context, L->getTemplateLoc(),
                                     L->getLAngleLoc(), Params,
-                                    L->getRAngleLoc(),
-                                    UninstantiatedRequiresClause);
+                                    L->getRAngleLoc(), InstRequiresClause);
   return InstL;
 }
 
